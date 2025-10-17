@@ -207,7 +207,7 @@ Based on the configuration above:
 
 ## Behavior Details
 
-Programms should always play in the order defined by their playlist.
+Programs should always play in the order defined by their playlist.
 
 ### Transitions
 
