@@ -12,6 +12,11 @@
 
 ## Code Style Guidelines
 
+## Warnings
+
+- Breaking changes are allowed because the app is not released yet; no migration is needed when implementing new
+  features or changes.
+- `cargo run` hangs until the process gets killed, thus always start the application in the background using `nohup`
 - **Error Handling**: Use `Result<T, Box<dyn std::error::Error>>` for fallible functions
 - **Async**: Use tokio runtime, prefer async/await over blocking operations
 - **Channels**: Use crossbeam-channel for thread communication, tokio channels for async

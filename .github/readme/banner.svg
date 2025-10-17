@@ -74,7 +74,7 @@
         font-family="'Courier New', monospace" 
         font-size="14" 
         fill="#94a3b8"
-        letter-spacing="2">ICECAST INTERNET RADIO SERVER</text>
+        letter-spacing="2">INTERNET RADIO SERVER</text>
   
   <!-- Sound waves -->
   <g transform="translate(680, 100)" opacity="0.6">
