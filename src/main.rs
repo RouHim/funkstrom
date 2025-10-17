@@ -4,6 +4,8 @@ mod audio_processor;
 mod audio_reader;
 mod cli;
 mod config;
+mod m3u_parser;
+mod schedule_engine;
 mod server_icecast;
 mod server_metadata;
 mod server_swagger;
@@ -13,6 +15,7 @@ use audio_processor::FFmpegProcessor;
 use audio_reader::AudioReader;
 use cli::get_config_path;
 use config::Config;
+use schedule_engine::ScheduleEngine;
 use server_icecast::IcecastServer;
 use std::path::PathBuf;
 
@@ -29,7 +32,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server.port
     );
     log::info!("Music directory: {}", config.library.music_directory);
-    log::info!("Station: {}", config.stream.station_name);
+    log::info!("Station: {}", config.station.station_name);
+
+    let schedule_command_rx = if let Some(ref schedule_config) = config.schedule {
+        if !schedule_config.programs.is_empty() && schedule_config.programs.iter().any(|p| p.active)
+        {
+            match ScheduleEngine::new(schedule_config.programs.clone()) {
+                Ok(engine) => {
+                    let rx = engine.get_command_receiver();
+                    engine.start();
+                    Some(rx)
+                }
+                Err(e) => {
+                    log::warn!("Failed to initialize schedule engine: {}", e);
+                    log::info!("Running in library-only mode");
+                    None
+                }
+            }
+        } else {
+            log::info!("No active programs found, running in library-only mode");
+            None
+        }
+    } else {
+        log::info!("No schedule configuration found, running in library-only mode");
+        None
+    };
 
     // Initialize components with correct API signatures
     let music_dir = PathBuf::from(&config.library.music_directory);
@@ -57,8 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get metadata reference before audio_reader is consumed
     let current_metadata = audio_reader.get_current_metadata();
 
-    // 1. Start AudioReader playlist service (consumes self, returns channels)
-    let track_rx = audio_reader.start_playlist_service();
+    let track_rx = audio_reader.start_playlist_service(schedule_command_rx);
 
     // 2. Start FFmpeg processor service (consumes self, needs track_rx input)
     let audio_rx = audio_processor.start_streaming_service(track_rx);
@@ -98,9 +124,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Start Icecast server (async method, returns ())
     let server = IcecastServer::new(
         stream_buffer,
-        config.stream.station_name.clone(),
-        config.stream.description.clone(),
-        config.stream.genre.clone(),
+        config.station.station_name.clone(),
+        config.station.description.clone(),
+        config.station.genre.clone(),
         config.stream.bitrate,
         current_metadata,
     );

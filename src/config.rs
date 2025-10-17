@@ -6,8 +6,10 @@ use std::path::PathBuf;
 pub struct Config {
     pub server: ServerConfig,
     pub library: LibraryConfig,
+    pub station: StationConfig,
     pub stream: StreamConfig,
     pub ffmpeg: FFmpegConfig,
+    pub schedule: Option<ScheduleConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -24,11 +26,15 @@ pub struct LibraryConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct StreamConfig {
+pub struct StationConfig {
     pub station_name: String,
     pub description: String,
     pub genre: String,
     pub url: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct StreamConfig {
     pub bitrate: u32,
     pub format: String,
     pub sample_rate: u32,
@@ -38,6 +44,20 @@ pub struct StreamConfig {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct FFmpegConfig {
     pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ScheduleConfig {
+    pub programs: Vec<ScheduleProgram>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ScheduleProgram {
+    pub name: String,
+    pub active: bool,
+    pub cron: String,
+    pub duration: String,
+    pub playlist: String,
 }
 
 impl Config {
@@ -60,17 +80,20 @@ impl Default for Config {
                 shuffle: true,
                 repeat: true,
             },
-            stream: StreamConfig {
+            station: StationConfig {
                 station_name: "My Radio Station".to_string(),
                 description: "Great music 24/7".to_string(),
                 genre: "Various".to_string(),
                 url: "http://localhost:8000".to_string(),
+            },
+            stream: StreamConfig {
                 bitrate: 128,
                 format: "mp3".to_string(),
                 sample_rate: 44100,
                 channels: 2,
             },
             ffmpeg: FFmpegConfig { path: None },
+            schedule: None,
         }
     }
 }
