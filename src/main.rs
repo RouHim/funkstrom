@@ -4,6 +4,8 @@ mod audio_processor;
 mod audio_reader;
 mod cli;
 mod config;
+mod library_db;
+mod library_scanner;
 mod m3u_parser;
 mod schedule_engine;
 mod server_icecast;
@@ -15,6 +17,8 @@ use audio_processor::FFmpegProcessor;
 use audio_reader::AudioReader;
 use cli::get_config_path;
 use config::Config;
+use library_db::LibraryDatabase;
+use library_scanner::LibraryScanner;
 use schedule_engine::ScheduleEngine;
 use server_icecast::IcecastServer;
 use std::path::PathBuf;
@@ -33,6 +37,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     log::info!("Music directory: {}", config.library.music_directory);
     log::info!("Station: {}", config.station.station_name);
+
+    std::fs::create_dir_all("./data")?;
+
+    let db = LibraryDatabase::new("./data/database.db")?;
+    db.initialize_schema()?;
+
+    let music_dir = PathBuf::from(&config.library.music_directory);
+    let scanner = LibraryScanner::new(music_dir.clone(), db.clone());
+
+    let track_count = db.track_count()?;
+    if track_count == 0 {
+        log::info!("Empty library, performing initial full scan...");
+        let result = scanner.full_scan()?;
+        log::info!("Initial scan complete: {} tracks added", result.added);
+        if !result.errors.is_empty() {
+            log::warn!("Scan encountered {} errors", result.errors.len());
+        }
+    } else {
+        log::info!("Performing incremental library scan...");
+        let result = scanner.incremental_scan()?;
+        if result.added > 0 || result.updated > 0 || result.deleted > 0 {
+            log::info!(
+                "Library changes: +{} ~{} -{} tracks",
+                result.added,
+                result.updated,
+                result.deleted
+            );
+        }
+    }
 
     let schedule_command_rx = if let Some(ref schedule_config) = config.schedule {
         if !schedule_config.programs.is_empty() && schedule_config.programs.iter().any(|p| p.active)
@@ -58,9 +91,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Initialize components with correct API signatures
-    let music_dir = PathBuf::from(&config.library.music_directory);
-    let audio_reader = AudioReader::new(music_dir, config.library.shuffle, config.library.repeat)?;
+    let audio_reader =
+        AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
 
     // FFmpegProcessor::new needs 4 parameters: ffmpeg_path, sample_rate, bitrate, channels
     let audio_processor = FFmpegProcessor::new(

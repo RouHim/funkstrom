@@ -1,11 +1,11 @@
 use crate::audio_metadata::TrackMetadata;
+use crate::library_db::LibraryDatabase;
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
 use crossbeam_channel::{unbounded, Receiver};
-use log::{debug, error, info};
+use log::{error, info};
 use std::collections::VecDeque;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
@@ -26,6 +26,7 @@ pub struct AudioReader {
     current_index: usize,
     current_metadata: Arc<Mutex<TrackMetadata>>,
     playlist_source: PlaylistSource,
+    db: LibraryDatabase,
 }
 
 impl AudioReader {
@@ -33,43 +34,22 @@ impl AudioReader {
         music_directory: PathBuf,
         shuffle: bool,
         repeat: bool,
+        db: LibraryDatabase,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut reader = Self {
-            music_directory,
-            library_shuffle: shuffle,
-            library_repeat: repeat,
-            playlist: VecDeque::new(),
-            current_index: 0,
-            current_metadata: Arc::new(Mutex::new(TrackMetadata::default())),
-            playlist_source: PlaylistSource::Library,
-        };
-        reader.scan_music_directory()?;
-        Ok(reader)
-    }
+        let tracks = db.get_all_tracks()?;
 
-    pub fn get_current_metadata(&self) -> Arc<Mutex<TrackMetadata>> {
-        Arc::clone(&self.current_metadata)
-    }
-
-    fn scan_music_directory(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Scanning music directory: {:?}", self.music_directory);
-
-        if !self.music_directory.exists() {
-            return Err(
-                format!("Music directory does not exist: {:?}", self.music_directory).into(),
-            );
+        if tracks.is_empty() {
+            return Err("No tracks found in library database".into());
         }
 
-        let mut files = Vec::new();
-        self.scan_directory_recursive(&self.music_directory, &mut files)?;
+        info!("Loaded {} tracks from database", tracks.len());
 
-        info!("Found {} audio files", files.len());
+        let mut playlist: VecDeque<PathBuf> = tracks
+            .into_iter()
+            .map(|t| PathBuf::from(t.file_path))
+            .collect();
 
-        if files.is_empty() {
-            return Err("No audio files found in music directory".into());
-        }
-
-        if self.library_shuffle {
+        if shuffle {
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
 
@@ -77,51 +57,28 @@ impl AudioReader {
             std::time::SystemTime::now().hash(&mut hasher);
             let seed = hasher.finish() as usize;
 
-            for i in (1..files.len()).rev() {
+            let mut playlist_vec: Vec<_> = playlist.drain(..).collect();
+            for i in (1..playlist_vec.len()).rev() {
                 let j = (seed + i * 17) % (i + 1);
-                files.swap(i, j);
+                playlist_vec.swap(i, j);
             }
+            playlist = playlist_vec.into_iter().collect();
         }
 
-        self.playlist = files.into_iter().collect();
-        Ok(())
+        Ok(Self {
+            music_directory,
+            library_shuffle: shuffle,
+            library_repeat: repeat,
+            playlist,
+            current_index: 0,
+            current_metadata: Arc::new(Mutex::new(TrackMetadata::default())),
+            playlist_source: PlaylistSource::Library,
+            db,
+        })
     }
 
-    fn scan_directory_recursive(
-        &self,
-        dir: &Path,
-        files: &mut Vec<PathBuf>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let entries = fs::read_dir(dir)?;
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                self.scan_directory_recursive(&path, files)?;
-            } else if self.is_audio_file(&path) {
-                debug!("Found audio file: {:?}", path);
-                files.push(path);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn is_audio_file(&self, path: &Path) -> bool {
-        if let Some(extension) = path.extension() {
-            if let Some(ext_str) = extension.to_str() {
-                matches!(
-                    ext_str.to_lowercase().as_str(),
-                    "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" | "opus" | "wma"
-                )
-            } else {
-                false
-            }
-        } else {
-            false
-        }
+    pub fn get_current_metadata(&self) -> Arc<Mutex<TrackMetadata>> {
+        Arc::clone(&self.current_metadata)
     }
 
     pub fn next_track(&mut self) -> Option<PathBuf> {
@@ -206,9 +163,41 @@ impl AudioReader {
     pub fn return_to_library(&mut self) {
         info!("Returning to library playlist");
         self.playlist.clear();
-        if self.scan_music_directory().is_ok() {
-            self.current_index = 0;
-            self.playlist_source = PlaylistSource::Library;
+
+        match self.db.get_all_tracks() {
+            Ok(tracks) => {
+                if !tracks.is_empty() {
+                    let mut new_playlist: VecDeque<PathBuf> = tracks
+                        .into_iter()
+                        .map(|t| PathBuf::from(t.file_path))
+                        .collect();
+
+                    if self.library_shuffle {
+                        use std::collections::hash_map::DefaultHasher;
+                        use std::hash::{Hash, Hasher};
+
+                        let mut hasher = DefaultHasher::new();
+                        std::time::SystemTime::now().hash(&mut hasher);
+                        let seed = hasher.finish() as usize;
+
+                        let mut playlist_vec: Vec<_> = new_playlist.drain(..).collect();
+                        for i in (1..playlist_vec.len()).rev() {
+                            let j = (seed + i * 17) % (i + 1);
+                            playlist_vec.swap(i, j);
+                        }
+                        new_playlist = playlist_vec.into_iter().collect();
+                    }
+
+                    self.playlist = new_playlist;
+                    self.current_index = 0;
+                    self.playlist_source = PlaylistSource::Library;
+                } else {
+                    error!("No tracks found in database when returning to library");
+                }
+            }
+            Err(e) => {
+                error!("Failed to load tracks from database: {}", e);
+            }
         }
     }
 

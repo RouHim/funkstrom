@@ -1,0 +1,5 @@
+#EXTM3U
+#EXTINF:180,Test Song 1
+../test_music/song-1.mp3
+#EXTINF:180,Test Song 2
+../test_music/song-2.mp3
