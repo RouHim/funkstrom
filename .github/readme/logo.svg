@@ -1,8 +1,8 @@
 <svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#0891b2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
     </linearGradient>
     <filter id="logoGlow">
       <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
@@ -14,7 +14,7 @@
   </defs>
   
   <!-- Background circle -->
-  <circle cx="100" cy="100" r="95" fill="#1e1e2e"/>
+  <circle cx="100" cy="100" r="95" fill="#0c1821"/>
   
   <!-- Outer ring -->
   <circle cx="100" cy="100" r="85" fill="none" stroke="url(#logoGrad)" stroke-width="3" opacity="0.3"/>
@@ -69,8 +69,8 @@
     <path d="M -15 20 L -10 -30 L 10 -30 L 15 20 Z" fill="url(#logoGrad)" filter="url(#logoGlow)"/>
     
     <!-- Antenna -->
-    <line x1="0" y1="-30" x2="0" y2="-50" stroke="#a5b4fc" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="0" cy="-50" r="5" fill="#fbbf24">
+    <line x1="0" y1="-30" x2="0" y2="-50" stroke="#67e8f9" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="0" cy="-50" r="5" fill="#14b8a6">
       <animate attributeName="opacity" 
                values="1;0.5;1" 
                dur="1.5s" 
@@ -79,15 +79,15 @@
     
     <!-- Speaker grill -->
     <g opacity="0.5">
-      <line x1="-12" y1="28" x2="12" y2="28" stroke="#1e1e2e" stroke-width="2"/>
-      <line x1="-12" y1="35" x2="12" y2="35" stroke="#1e1e2e" stroke-width="2"/>
-      <line x1="-12" y1="42" x2="12" y2="42" stroke="#1e1e2e" stroke-width="2"/>
-      <line x1="-12" y1="49" x2="12" y2="49" stroke="#1e1e2e" stroke-width="2"/>
+      <line x1="-12" y1="28" x2="12" y2="28" stroke="#0c1821" stroke-width="2"/>
+      <line x1="-12" y1="35" x2="12" y2="35" stroke="#0c1821" stroke-width="2"/>
+      <line x1="-12" y1="42" x2="12" y2="42" stroke="#0c1821" stroke-width="2"/>
+      <line x1="-12" y1="49" x2="12" y2="49" stroke="#0c1821" stroke-width="2"/>
     </g>
     
     <!-- Volume dial -->
-    <circle cx="0" cy="15" r="6" fill="#1e1e2e" stroke="#fbbf24" stroke-width="2"/>
-    <line x1="0" y1="15" x2="4" y2="11" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="0" cy="15" r="6" fill="#0c1821" stroke="#14b8a6" stroke-width="2"/>
+    <line x1="0" y1="15" x2="4" y2="11" stroke="#14b8a6" stroke-width="2" stroke-linecap="round"/>
   </g>
   
   <!-- Bottom text -->

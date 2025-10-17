@@ -1,5 +1,17 @@
 # AGENTS.md - Funkstrom Coding Guidelines
 
+## Color Schema - Deep Sea Radio
+
+Official color palette for all visual assets:
+
+- **Primary Gradient**: `#0891b2` (Cyan) → `#1e40af` (Deep Blue)
+- **Background**: `#0c1821` (Deep ocean)
+- **Accent**: `#14b8a6` (Teal)
+- **Secondary**: `#67e8f9` (Light cyan)
+- **Text**: `#cffafe` (Ice cyan)
+
+Vibe: Oceanic, calm, professional with mysterious depth
+
 ## Build/Test/Lint Commands
 
 - `cargo build` - Build the project

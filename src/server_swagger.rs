@@ -35,7 +35,7 @@ pub fn swagger_ui() -> impl Filter<Extract = impl Reply, Error = warp::Rejection
         }
         .swagger-ui .info .title {
             font-size: 36px;
-            color: #3b4151;
+            color: #0891b2;
         }
     </style>
 </head>
