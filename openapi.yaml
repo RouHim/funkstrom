@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: Funkstrom API
+  description: |
+    **Funkstrom** is an Icecast-compatible internet radio server written in Rust.
+
+    ## Features
+    - MP3 audio streaming with Icecast protocol support
+    - Automatic audio transcoding via FFmpeg
+    - Real-time metadata extraction and serving
+    - Circular buffer for continuous streaming
+    - Multiple client support
+
+    ## Getting Started
+    1. Start the server: `cargo run -- --config config.toml`
+    2. Open the info page: http://127.0.0.1:3002/
+    3. Stream audio in VLC/iTunes: http://127.0.0.1:3002/stream
+
+  version: 0.1.0
+  contact:
+    name: Funkstrom Project
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://127.0.0.1:3002
+    description: Local development server
+  - url: http://localhost:3002
+    description: Local server (alternative)
+
+tags:
+  - name: streaming
+    description: Audio streaming endpoints
+  - name: monitoring
+    description: Server monitoring and status
+  - name: metadata
+    description: Track metadata information
+  - name: info
+    description: Server information pages
+
+paths:
+  /stream:
+    get:
+      tags:
+        - streaming
+      summary: Audio stream endpoint
+      description: |
+        Main audio streaming endpoint that provides continuous MP3 audio stream.
+        Compatible with Icecast protocol and works with VLC, iTunes, Winamp, and other media players.
+
+        ## Features
+        - Continuous MP3 stream at configured bitrate (default 128 kbps)
+        - Icecast-compatible headers for metadata support
+        - Automatic client timeout after 30 seconds of inactivity
+        - CORS enabled for web players
+
+        ## Usage
+        Open this URL in any media player that supports HTTP streaming.
+
+      operationId: getStream
+      responses:
+        '200':
+          description: Successful audio stream
+          headers:
+            Content-Type:
+              description: MIME type of the audio stream
+              schema:
+                type: string
+                example: audio/mpeg
+            icy-name:
+              description: Station name (Icecast protocol)
+              schema:
+                type: string
+                example: My Radio Station
+            icy-description:
+              description: Station description (Icecast protocol)
+              schema:
+                type: string
+                example: Great music 24/7
+            icy-genre:
+              description: Station genre (Icecast protocol)
+              schema:
+                type: string
+                example: Various
+            icy-br:
+              description: Bitrate in kbps (Icecast protocol)
+              schema:
+                type: integer
+                example: 128
+            icy-metaint:
+              description: Metadata interval for Icecast protocol
+              schema:
+                type: integer
+                example: 16000
+            Cache-Control:
+              description: Caching policy
+              schema:
+                type: string
+                example: no-cache, no-store
+            Access-Control-Allow-Origin:
+              description: CORS header
+              schema:
+                type: string
+                example: "*"
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+              example: <binary MP3 audio data>
+
+  /status:
+    get:
+      tags:
+        - monitoring
+      summary: Server status and health check
+      description: |
+        Returns server health status, buffer metrics, and station configuration.
+        Useful for monitoring tools, dashboards, and automated health checks.
+
+        ## Metrics Included
+        - Server operational status (online/offline)
+        - Buffer fill level (chunks and bytes)
+        - Station configuration (name, description, genre, bitrate)
+        - Uptime information (planned feature)
+
+      operationId: getStatus
+      responses:
+        '200':
+          description: Server status information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerStatus'
+              examples:
+                online:
+                  summary: Server is online and streaming
+                  value:
+                    status: online
+                    station_name: My Radio Station
+                    station_description: Great music 24/7
+                    station_genre: Various
+                    bitrate: 128
+                    buffer_chunks: 1000
+                    buffer_bytes: 8176452
+                    uptime: unknown
+                offline:
+                  summary: Server is offline
+                  value:
+                    status: offline
+                    station_name: My Radio Station
+                    station_description: Great music 24/7
+                    station_genre: Various
+                    bitrate: 128
+                    buffer_chunks: 0
+                    buffer_bytes: 0
+                    uptime: unknown
+
+  /current:
+    get:
+      tags:
+        - metadata
+      summary: Current track metadata
+      description: |
+        Returns metadata for the currently playing track.
+        Metadata is extracted from audio file tags (ID3, Vorbis comments, etc.) or derived from filename.
+
+        ## Metadata Sources
+        - **Primary**: ID3 tags, Vorbis comments, MP4 atoms (using audiotags library)
+        - **Fallback**: Filename when tags are unavailable
+
+        ## Supported Formats
+        MP3, FLAC, WAV, OGG, AAC, M4A, OPUS, WMA
+
+      operationId: getCurrentTrack
+      responses:
+        '200':
+          description: Current track metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrackMetadata'
+              examples:
+                withTags:
+                  summary: Track with ID3 tags
+                  value:
+                    title: Bohemian Rhapsody
+                    artist: Queen
+                    album: A Night at the Opera
+                    file_path: /music/queen/bohemian_rhapsody.mp3
+                withoutTags:
+                  summary: Track without tags (filename fallback)
+                  value:
+                    title: song-2
+                    artist: Unknown Artist
+                    album: Unknown Album
+                    file_path: /music/song-2.mp3
+
+  /:
+    get:
+      tags:
+        - info
+      summary: Server information page
+      description: |
+        HTML landing page with server information, current track display, and listening instructions.
+        Provides a user-friendly interface for accessing the radio stream.
+
+        ## Features
+        - "Now Playing" section with current track
+        - Station information
+        - Quick links to stream and API endpoints
+        - Copy-paste stream URL for media players
+
+      operationId: getInfoPage
+      responses:
+        '200':
+          description: HTML information page
+          content:
+            text/html:
+              schema:
+                type: string
+              example: |
+                <!DOCTYPE html>
+                <html>
+                <head><title>My Radio Station - Funkstrom</title></head>
+                <body>
+                  <h1>My Radio Station</h1>
+                  <div class="now-playing">
+                    <h2>Now Playing</h2>
+                    <div>Artist - Track Title</div>
+                  </div>
+                  ...
+                </body>
+                </html>
+
+components:
+  schemas:
+    ServerStatus:
+      type: object
+      description: Server status and metrics
+      required:
+        - status
+        - station_name
+        - station_description
+        - station_genre
+        - bitrate
+        - buffer_chunks
+        - buffer_bytes
+        - uptime
+      properties:
+        status:
+          type: string
+          enum: [online, offline]
+          description: Server operational status
+          example: online
+        station_name:
+          type: string
+          description: Radio station name
+          example: My Radio Station
+        station_description:
+          type: string
+          description: Station description
+          example: Great music 24/7
+        station_genre:
+          type: string
+          description: Station genre
+          example: Various
+        bitrate:
+          type: integer
+          format: int32
+          description: Streaming bitrate in kbps
+          example: 128
+          minimum: 32
+          maximum: 320
+        buffer_chunks:
+          type: integer
+          format: int32
+          description: Number of audio chunks in circular buffer
+          example: 1000
+          minimum: 0
+          maximum: 1000
+        buffer_bytes:
+          type: integer
+          format: int64
+          description: Total bytes of audio data in buffer
+          example: 8176452
+          minimum: 0
+          maximum: 52428800
+        uptime:
+          type: string
+          description: Server uptime (not yet implemented)
+          example: unknown
+
+    TrackMetadata:
+      type: object
+      description: Audio track metadata
+      required:
+        - title
+        - artist
+        - album
+        - file_path
+      properties:
+        title:
+          type: string
+          description: Track title (from tags or filename)
+          example: Bohemian Rhapsody
+        artist:
+          type: string
+          description: Artist name (from tags or "Unknown Artist")
+          example: Queen
+        album:
+          type: string
+          description: Album name (from tags or "Unknown Album")
+          example: A Night at the Opera
+        file_path:
+          type: string
+          description: Absolute path to the audio file
+          example: /music/queen/bohemian_rhapsody.mp3
+
+  examples:
+    ServerOnlineStatus:
+      summary: Server is online
+      value:
+        status: online
+        station_name: My Radio Station
+        station_description: Great music 24/7
+        station_genre: Various
+        bitrate: 128
+        buffer_chunks: 1000
+        buffer_bytes: 8176452
+        uptime: unknown
+
+    CurrentTrackWithTags:
+      summary: Track with complete metadata
+      value:
+        title: Bohemian Rhapsody
+        artist: Queen
+        album: A Night at the Opera
+        file_path: /music/queen/bohemian_rhapsody.mp3

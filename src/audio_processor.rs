@@ -1,0 +1,200 @@
+use bytes::Bytes;
+use crossbeam_channel::{unbounded, Receiver};
+use log::{debug, error, info, warn};
+use std::io::{BufReader, Read};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+
+pub struct FFmpegProcessor {
+    ffmpeg_path: String,
+    sample_rate: u32,
+    bitrate: u32,
+    channels: u8,
+}
+
+impl FFmpegProcessor {
+    pub fn new(ffmpeg_path: Option<String>, sample_rate: u32, bitrate: u32, channels: u8) -> Self {
+        Self {
+            ffmpeg_path: ffmpeg_path.unwrap_or_else(|| "ffmpeg".to_string()),
+            sample_rate,
+            bitrate,
+            channels,
+        }
+    }
+
+    pub fn check_ffmpeg_available(&self) -> Result<(), Box<dyn std::error::Error>> {
+        debug!("Checking FFmpeg availability at: {}", self.ffmpeg_path);
+
+        let output = Command::new(&self.ffmpeg_path)
+            .args(["-version"])
+            .output()?;
+
+        if !output.status.success() {
+            return Err(format!("FFmpeg not found at path: {}", self.ffmpeg_path).into());
+        }
+
+        let version_info = String::from_utf8_lossy(&output.stdout);
+        info!(
+            "FFmpeg available: {}",
+            version_info.lines().next().unwrap_or("Unknown version")
+        );
+
+        Ok(())
+    }
+
+    pub fn start_conversion_process(
+        &self,
+        input_path: &Path,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error>> {
+        info!("Starting FFmpeg conversion for: {:?}", input_path);
+
+        if !input_path.exists() {
+            return Err(format!("Input file does not exist: {:?}", input_path).into());
+        }
+
+        let mut cmd = Command::new(&self.ffmpeg_path);
+        cmd.args([
+            "-i",
+            input_path.to_str().unwrap(),
+            "-f",
+            "mp3",
+            "-acodec",
+            "libmp3lame",
+            "-ab",
+            &format!("{}k", self.bitrate),
+            "-ar",
+            &self.sample_rate.to_string(),
+            "-ac",
+            &self.channels.to_string(),
+            "-loglevel",
+            "error",
+            "-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+        debug!("FFmpeg command: {:?}", cmd);
+
+        let child = cmd.spawn()?;
+
+        Ok(AudioProcess::new(child))
+    }
+
+    pub fn start_streaming_service(
+        self,
+        track_rx: Receiver<std::path::PathBuf>,
+    ) -> Receiver<AudioChunk> {
+        let (audio_tx, audio_rx) = unbounded::<AudioChunk>();
+
+        tokio::spawn(async move {
+            let mut current_process: Option<AudioProcess> = None;
+            let mut current_track: Option<std::path::PathBuf> = None;
+
+            loop {
+                // Start new process if needed
+                if current_process.is_none() {
+                    // Try to get next track
+                    if let Ok(track) = track_rx.try_recv() {
+                        current_track = Some(track.clone());
+                        match self.start_conversion_process(&track) {
+                            Ok(process) => {
+                                info!("Started processing track: {:?}", track);
+                                current_process = Some(process);
+                            }
+                            Err(e) => {
+                                error!("Failed to start FFmpeg process for {:?}: {}", track, e);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // Read from current process
+                if let Some(ref mut process) = current_process {
+                    match process.read_chunk() {
+                        Ok(Some(chunk)) => {
+                            let audio_chunk = AudioChunk { data: chunk };
+
+                            if audio_tx.send(audio_chunk).is_err() {
+                                warn!("Failed to send audio chunk - receiver dropped");
+                                break;
+                            }
+                        }
+                        Ok(None) => {
+                            // Process finished
+                            info!("Track processing completed: {:?}", current_track);
+                            current_process = None;
+                            current_track = None;
+                        }
+                        Err(e) => {
+                            error!("Error reading from FFmpeg process: {}", e);
+                            current_process = None;
+                            current_track = None;
+                        }
+                    }
+                }
+
+                // Small delay to avoid busy waiting
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            }
+        });
+
+        audio_rx
+    }
+}
+
+pub struct AudioProcess {
+    child: Child,
+    reader: Option<BufReader<std::process::ChildStdout>>,
+}
+
+impl AudioProcess {
+    fn new(mut child: Child) -> Self {
+        let reader = child.stdout.take().map(BufReader::new);
+        Self { child, reader }
+    }
+
+    pub fn read_chunk(&mut self) -> Result<Option<Bytes>, Box<dyn std::error::Error>> {
+        if let Some(ref mut reader) = self.reader {
+            let mut buffer = [0u8; 8192]; // 8KB chunks
+
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    // EOF reached
+                    self.wait_for_completion()?;
+                    Ok(None)
+                }
+                Ok(bytes_read) => Ok(Some(Bytes::copy_from_slice(&buffer[..bytes_read]))),
+                Err(e) => {
+                    error!("Error reading from FFmpeg stdout: {}", e);
+                    Err(e.into())
+                }
+            }
+        } else {
+            Err("No stdout reader available".into())
+        }
+    }
+
+    fn wait_for_completion(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match self.child.wait() {
+            Ok(status) => {
+                if status.success() {
+                    debug!("FFmpeg process completed successfully");
+                } else {
+                    warn!("FFmpeg process exited with status: {}", status);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                error!("Error waiting for FFmpeg process: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioChunk {
+    pub data: Bytes,
+}

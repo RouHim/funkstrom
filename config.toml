@@ -1,0 +1,21 @@
+[server]
+port = 3002
+bind_address = "127.0.0.1"
+
+[audio]
+music_directory = "/home/rouven/projects/funkstation/test_music"
+shuffle = true
+repeat = true
+bitrate = 128
+format = "mp3"
+sample_rate = 44100
+channels = 2
+
+[stream]
+station_name = "My Radio Station"
+description = "Great music 24/7"
+genre = "Various"
+url = "http://localhost:3002"
+
+[ffmpeg]
+path = "/usr/bin/ffmpeg"
