@@ -28,19 +28,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server.bind_address,
         config.server.port
     );
-    log::info!("Music directory: {}", config.audio.music_directory);
+    log::info!("Music directory: {}", config.library.music_directory);
     log::info!("Station: {}", config.stream.station_name);
 
     // Initialize components with correct API signatures
-    let music_dir = PathBuf::from(&config.audio.music_directory);
-    let audio_reader = AudioReader::new(music_dir, config.audio.shuffle, config.audio.repeat)?;
+    let music_dir = PathBuf::from(&config.library.music_directory);
+    let audio_reader = AudioReader::new(music_dir, config.library.shuffle, config.library.repeat)?;
 
     // FFmpegProcessor::new needs 4 parameters: ffmpeg_path, sample_rate, bitrate, channels
     let audio_processor = FFmpegProcessor::new(
         config.ffmpeg.path.clone(),
-        config.audio.sample_rate,
-        config.audio.bitrate,
-        config.audio.channels, // Added missing channels parameter
+        config.stream.sample_rate,
+        config.stream.bitrate,
+        config.stream.channels,
     );
 
     // Check FFmpeg availability
@@ -97,11 +97,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Start Icecast server (async method, returns ())
     let server = IcecastServer::new(
-        stream_buffer, // Remove .clone() - move ownership
+        stream_buffer,
         config.stream.station_name.clone(),
         config.stream.description.clone(),
         config.stream.genre.clone(),
-        config.audio.bitrate,
+        config.stream.bitrate,
         current_metadata,
     );
 
