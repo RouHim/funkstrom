@@ -58,6 +58,9 @@ Supported formats:
 - **Minutes**: `"30m"`, `"45m"`, `"90m"`
 - **Hours**: `"1h"`, `"2h"`, `"12h"`
 
+> Smallest unit is minutes. No seconds support.
+> The smallest value is `"1m"`.
+
 Examples:
 
 ```toml
@@ -204,12 +207,7 @@ Based on the configuration above:
 
 ## Behavior Details
 
-### Shuffle and Repeat
-
-Programs inherit the `shuffle` and `repeat` settings from the `[library]` section:
-
-- If `shuffle = true`, program playlists are shuffled
-- If `repeat = true`, program playlists loop if they finish before duration ends
+Programs should always play in the order defined by their playlist.
 
 ### Transitions
 
