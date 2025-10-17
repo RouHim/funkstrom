@@ -323,7 +323,7 @@ impl LibraryScanner {
                     .unwrap_or_else(|| "Unknown Artist".to_string());
                 let album = tag
                     .album()
-                    .map(|a| a.title.to_string())
+                    .map(|s| s.to_string())
                     .unwrap_or_else(|| "Unknown Album".to_string());
                 (title, artist, album)
             }
