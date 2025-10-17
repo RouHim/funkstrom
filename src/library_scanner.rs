@@ -297,7 +297,7 @@ impl LibraryScanner {
         }
     }
 
-    fn process_file(&self, path: &PathBuf) -> Result<TrackRecord, Box<dyn Error>> {
+    fn process_file(&self, path: &Path) -> Result<TrackRecord, Box<dyn Error>> {
         let file_path = path.to_string_lossy().to_string();
         let metadata = fs::metadata(path)?;
         let file_size = metadata.len() as i64;
@@ -345,7 +345,6 @@ impl LibraryScanner {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         Ok(TrackRecord {
-            id: None,
             file_path,
             title,
             artist,

@@ -54,6 +54,8 @@ Vibe: Oceanic, calm, professional with mysterious depth
 - Write clear, readable, and straightforward code.
 - Use descriptive names and avoid clever tricks or shortcuts that hinder comprehensibility.
 - Keep functions and files focused and concise.
+- YAGNI - You Aren't Gonna Need It: Avoid adding functionality until it is necessary.
+- Don't write unused code for future features.
 
 ## Dependency Management
 

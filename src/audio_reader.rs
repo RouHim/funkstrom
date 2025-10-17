@@ -18,8 +18,23 @@ enum PlaylistSource {
     },
 }
 
+fn shuffle_playlist(mut playlist: VecDeque<PathBuf>) -> VecDeque<PathBuf> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    std::time::SystemTime::now().hash(&mut hasher);
+    let seed = hasher.finish() as usize;
+
+    let mut playlist_vec: Vec<_> = playlist.drain(..).collect();
+    for i in (1..playlist_vec.len()).rev() {
+        let j = (seed + i * 17) % (i + 1);
+        playlist_vec.swap(i, j);
+    }
+    playlist_vec.into_iter().collect()
+}
+
 pub struct AudioReader {
-    music_directory: PathBuf,
     library_shuffle: bool,
     library_repeat: bool,
     playlist: VecDeque<PathBuf>,
@@ -31,7 +46,7 @@ pub struct AudioReader {
 
 impl AudioReader {
     pub fn new(
-        music_directory: PathBuf,
+        _music_directory: PathBuf,
         shuffle: bool,
         repeat: bool,
         db: LibraryDatabase,
@@ -50,23 +65,10 @@ impl AudioReader {
             .collect();
 
         if shuffle {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-
-            let mut hasher = DefaultHasher::new();
-            std::time::SystemTime::now().hash(&mut hasher);
-            let seed = hasher.finish() as usize;
-
-            let mut playlist_vec: Vec<_> = playlist.drain(..).collect();
-            for i in (1..playlist_vec.len()).rev() {
-                let j = (seed + i * 17) % (i + 1);
-                playlist_vec.swap(i, j);
-            }
-            playlist = playlist_vec.into_iter().collect();
+            playlist = shuffle_playlist(playlist);
         }
 
         Ok(Self {
-            music_directory,
             library_shuffle: shuffle,
             library_repeat: repeat,
             playlist,
@@ -104,21 +106,7 @@ impl AudioReader {
                     if self.library_repeat {
                         self.current_index = 0;
                         if self.library_shuffle {
-                            let mut playlist_vec: Vec<_> = self.playlist.drain(..).collect();
-
-                            use std::collections::hash_map::DefaultHasher;
-                            use std::hash::{Hash, Hasher};
-
-                            let mut hasher = DefaultHasher::new();
-                            std::time::SystemTime::now().hash(&mut hasher);
-                            let seed = hasher.finish() as usize;
-
-                            for i in (1..playlist_vec.len()).rev() {
-                                let j = (seed + i * 17) % (i + 1);
-                                playlist_vec.swap(i, j);
-                            }
-
-                            self.playlist = playlist_vec.into_iter().collect();
+                            self.playlist = shuffle_playlist(self.playlist.clone());
                         }
                     } else {
                         return None;
@@ -173,19 +161,7 @@ impl AudioReader {
                         .collect();
 
                     if self.library_shuffle {
-                        use std::collections::hash_map::DefaultHasher;
-                        use std::hash::{Hash, Hasher};
-
-                        let mut hasher = DefaultHasher::new();
-                        std::time::SystemTime::now().hash(&mut hasher);
-                        let seed = hasher.finish() as usize;
-
-                        let mut playlist_vec: Vec<_> = new_playlist.drain(..).collect();
-                        for i in (1..playlist_vec.len()).rev() {
-                            let j = (seed + i * 17) % (i + 1);
-                            playlist_vec.swap(i, j);
-                        }
-                        new_playlist = playlist_vec.into_iter().collect();
+                        new_playlist = shuffle_playlist(new_playlist);
                     }
 
                     self.playlist = new_playlist;

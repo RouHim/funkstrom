@@ -27,6 +27,8 @@ use std::path::PathBuf;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
+    std::fs::create_dir_all("./data")?;
+
     let config_path = get_config_path();
     let config = Config::from_file(&config_path)?;
 
@@ -37,8 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     log::info!("Music directory: {}", config.library.music_directory);
     log::info!("Station: {}", config.station.station_name);
-
-    std::fs::create_dir_all("./data")?;
 
     let db = LibraryDatabase::new("./data/database.db")?;
     db.initialize_schema()?;

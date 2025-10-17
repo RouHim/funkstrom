@@ -6,7 +6,6 @@ use std::error::Error;
 
 #[derive(Debug, Clone)]
 pub struct TrackRecord {
-    pub id: Option<i64>,
     pub file_path: String,
     pub title: String,
     pub artist: String,
@@ -218,41 +217,6 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn get_track_by_path(
-        &self,
-        file_path: &str,
-    ) -> Result<Option<TrackRecord>, Box<dyn Error>> {
-        let conn = self.pool.get()?;
-
-        let mut stmt = conn.prepare(
-            "SELECT id, file_path, title, artist, album, duration_seconds,
-                file_size, last_modified, file_extension, created_at, updated_at
-             FROM tracks WHERE file_path = ?1",
-        )?;
-
-        let result: SqliteResult<TrackRecord> = stmt.query_row(params![file_path], |row| {
-            Ok(TrackRecord {
-                id: Some(row.get(0)?),
-                file_path: row.get(1)?,
-                title: row.get(2)?,
-                artist: row.get(3)?,
-                album: row.get(4)?,
-                duration_seconds: row.get(5)?,
-                file_size: row.get(6)?,
-                last_modified: row.get(7)?,
-                file_extension: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-            })
-        });
-
-        match result {
-            Ok(track) => Ok(Some(track)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(Box::new(e)),
-        }
-    }
-
     pub fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, Box<dyn Error>> {
         let conn = self.pool.get()?;
 
@@ -265,7 +229,6 @@ impl LibraryDatabase {
         let tracks = stmt
             .query_map([], |row| {
                 Ok(TrackRecord {
-                    id: Some(row.get(0)?),
                     file_path: row.get(1)?,
                     title: row.get(2)?,
                     artist: row.get(3)?,
@@ -299,22 +262,6 @@ impl LibraryDatabase {
         let conn = self.pool.get()?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
         Ok(count as usize)
-    }
-
-    pub fn get_metadata(&self, key: &str) -> Result<Option<String>, Box<dyn Error>> {
-        let conn = self.pool.get()?;
-
-        let result: SqliteResult<String> = conn.query_row(
-            "SELECT value FROM library_metadata WHERE key = ?1",
-            params![key],
-            |row| row.get(0),
-        );
-
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(Box::new(e)),
-        }
     }
 
     pub fn set_metadata(&self, key: &str, value: &str) -> Result<(), Box<dyn Error>> {
