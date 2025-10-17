@@ -1,5 +1,5 @@
 # Next features
 
-[ ] Playout schedule
-[ ] liveset support hearme.at
-[ ] Support multiple output streams
+* [ ] Sqlite music library
+* [ ] liveset support hearme.at
+* [ ] Support multiple output streams

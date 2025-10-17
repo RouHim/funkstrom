@@ -1,4 +1,6 @@
 use crate::audio_metadata::TrackMetadata;
+use crate::schedule_engine::PlaylistCommand;
+use chrono::Duration;
 use crossbeam_channel::{unbounded, Receiver};
 use log::{debug, error, info};
 use std::collections::VecDeque;
@@ -6,13 +8,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, Clone)]
+enum PlaylistSource {
+    Library,
+    Scheduled {
+        #[allow(dead_code)]
+        name: String,
+        end_time: std::time::Instant,
+    },
+}
+
 pub struct AudioReader {
     music_directory: PathBuf,
-    shuffle: bool,
-    repeat: bool,
+    library_shuffle: bool,
+    library_repeat: bool,
     playlist: VecDeque<PathBuf>,
     current_index: usize,
     current_metadata: Arc<Mutex<TrackMetadata>>,
+    playlist_source: PlaylistSource,
 }
 
 impl AudioReader {
@@ -23,11 +36,12 @@ impl AudioReader {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut reader = Self {
             music_directory,
-            shuffle,
-            repeat,
+            library_shuffle: shuffle,
+            library_repeat: repeat,
             playlist: VecDeque::new(),
             current_index: 0,
             current_metadata: Arc::new(Mutex::new(TrackMetadata::default())),
+            playlist_source: PlaylistSource::Library,
         };
         reader.scan_music_directory()?;
         Ok(reader)
@@ -55,11 +69,10 @@ impl AudioReader {
             return Err("No audio files found in music directory".into());
         }
 
-        if self.shuffle {
+        if self.library_shuffle {
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
 
-            // Simple shuffle using current time as seed
             let mut hasher = DefaultHasher::new();
             std::time::SystemTime::now().hash(&mut hasher);
             let seed = hasher.finish() as usize;
@@ -129,41 +142,100 @@ impl AudioReader {
         self.current_index += 1;
 
         if self.current_index >= self.playlist.len() {
-            if self.repeat {
-                self.current_index = 0;
-                if self.shuffle {
-                    // Re-shuffle for next iteration
-                    let mut playlist_vec: Vec<_> = self.playlist.drain(..).collect();
+            match &self.playlist_source {
+                PlaylistSource::Library => {
+                    if self.library_repeat {
+                        self.current_index = 0;
+                        if self.library_shuffle {
+                            let mut playlist_vec: Vec<_> = self.playlist.drain(..).collect();
 
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
+                            use std::collections::hash_map::DefaultHasher;
+                            use std::hash::{Hash, Hasher};
 
-                    let mut hasher = DefaultHasher::new();
-                    std::time::SystemTime::now().hash(&mut hasher);
-                    let seed = hasher.finish() as usize;
+                            let mut hasher = DefaultHasher::new();
+                            std::time::SystemTime::now().hash(&mut hasher);
+                            let seed = hasher.finish() as usize;
 
-                    for i in (1..playlist_vec.len()).rev() {
-                        let j = (seed + i * 17) % (i + 1);
-                        playlist_vec.swap(i, j);
+                            for i in (1..playlist_vec.len()).rev() {
+                                let j = (seed + i * 17) % (i + 1);
+                                playlist_vec.swap(i, j);
+                            }
+
+                            self.playlist = playlist_vec.into_iter().collect();
+                        }
+                    } else {
+                        return None;
                     }
-
-                    self.playlist = playlist_vec.into_iter().collect();
                 }
-            } else {
-                // End of playlist, no repeat
-                return None;
+                PlaylistSource::Scheduled { name: _, end_time } => {
+                    if std::time::Instant::now() >= *end_time {
+                        info!("Scheduled program ended, returning to library");
+                        self.return_to_library();
+                        return self.next_track();
+                    } else {
+                        self.current_index = 0;
+                    }
+                }
             }
         }
 
         track
     }
 
-    pub fn start_playlist_service(mut self) -> Receiver<PathBuf> {
+    pub fn switch_to_scheduled_playlist(
+        &mut self,
+        name: String,
+        tracks: Vec<PathBuf>,
+        duration: Duration,
+    ) {
+        info!(
+            "Switching to scheduled playlist '{}' with {} tracks",
+            name,
+            tracks.len()
+        );
+
+        self.playlist = tracks.into_iter().collect();
+        self.current_index = 0;
+
+        let duration_std = std::time::Duration::from_secs(duration.num_seconds() as u64);
+        let end_time = std::time::Instant::now() + duration_std;
+
+        self.playlist_source = PlaylistSource::Scheduled { name, end_time };
+    }
+
+    pub fn return_to_library(&mut self) {
+        info!("Returning to library playlist");
+        self.playlist.clear();
+        if self.scan_music_directory().is_ok() {
+            self.current_index = 0;
+            self.playlist_source = PlaylistSource::Library;
+        }
+    }
+
+    pub fn start_playlist_service(
+        mut self,
+        schedule_command_rx: Option<Receiver<PlaylistCommand>>,
+    ) -> Receiver<PathBuf> {
         let (track_tx, track_rx) = unbounded::<PathBuf>();
 
         tokio::spawn(async move {
             loop {
-                // Send next track
+                if let Some(ref cmd_rx) = schedule_command_rx {
+                    match cmd_rx.try_recv() {
+                        Ok(PlaylistCommand::SwitchToPlaylist {
+                            name,
+                            tracks,
+                            duration,
+                        }) => {
+                            self.switch_to_scheduled_playlist(name, tracks, duration);
+                        }
+                        Ok(PlaylistCommand::ReturnToLibrary) => {
+                            self.return_to_library();
+                        }
+                        Err(_) => {}
+                    }
+                }
+
                 if let Some(track) = self.next_track() {
                     info!("Next track: {:?}", track);
                     if track_tx.send(track).is_err() {
@@ -172,7 +244,9 @@ impl AudioReader {
                     }
                 } else {
                     info!("End of playlist reached");
-                    if !self.repeat {
+                    if !self.library_repeat
+                        && matches!(self.playlist_source, PlaylistSource::Library)
+                    {
                         break;
                     }
                 }
