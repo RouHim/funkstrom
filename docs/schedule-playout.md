@@ -2,7 +2,9 @@
 
 ## Overview
 
-The Schedule Playout feature allows you to interrupt the default library playout with scheduled programs at specific times using cron syntax. Programs play M3U playlists for a defined duration, then automatically return to the default library playout.
+The Schedule Playout feature allows you to interrupt the default library playout with scheduled programs at specific
+times using cron syntax. Programs play M3U playlists for a defined duration, then automatically return to the default
+library playout.
 
 ## Behavior
 
@@ -41,21 +43,23 @@ playlist = "/playlists/jazz.m3u"
 
 ### Program Fields
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | String | Yes | Program identifier for logging |
-| `active` | Boolean | Yes | Enable/disable this program |
-| `cron` | String | Yes | Cron expression for start time |
-| `duration` | String | Yes | Duration in human format (30m, 2h) |
-| `playlist` | String | Yes | Path to M3U playlist file |
+| Field      | Type    | Required | Description                        |
+|------------|---------|----------|------------------------------------|
+| `name`     | String  | Yes      | Program identifier for logging     |
+| `active`   | Boolean | Yes      | Enable/disable this program        |
+| `cron`     | String  | Yes      | Cron expression for start time     |
+| `duration` | String  | Yes      | Duration in human format (30m, 2h) |
+| `playlist` | String  | Yes      | Path to M3U playlist file          |
 
 ### Duration Format
 
 Supported formats:
+
 - **Minutes**: `"30m"`, `"45m"`, `"90m"`
 - **Hours**: `"1h"`, `"2h"`, `"12h"`
 
 Examples:
+
 ```toml
 duration = "30m"   # 30 minutes
 duration = "2h"    # 2 hours
@@ -65,6 +69,7 @@ duration = "90m"   # 1 hour 30 minutes
 ### Cron Expressions
 
 Standard cron syntax with 5 fields:
+
 ```
 ┌─────── minute (0 - 59)
 │ ┌───── hour (0 - 23)
@@ -76,6 +81,7 @@ Standard cron syntax with 5 fields:
 ```
 
 Examples:
+
 ```toml
 cron = "0 6 * * *"      # Every day at 6:00 AM
 cron = "0 6 * * 1-5"    # Weekdays at 6:00 AM
@@ -201,6 +207,7 @@ Based on the configuration above:
 ### Shuffle and Repeat
 
 Programs inherit the `shuffle` and `repeat` settings from the `[library]` section:
+
 - If `shuffle = true`, program playlists are shuffled
 - If `repeat = true`, program playlists loop if they finish before duration ends
 
@@ -214,8 +221,8 @@ Programs inherit the `shuffle` and `repeat` settings from the `[library]` sectio
 
 - Programs run for the specified duration, then stop
 - If playlist ends before duration: behavior depends on `repeat` setting
-  - `repeat = true`: Playlist loops
-  - `repeat = false`: Returns to library early
+    - `repeat = true`: Playlist loops
+    - `repeat = false`: Returns to library early
 - If playlist is longer than duration: Stops at duration end
 
 ### Activation Logic
@@ -242,6 +249,7 @@ Invalid programs are skipped with error messages in logs.
 ## Logging
 
 Schedule events are logged:
+
 ```
 INFO: Schedule engine activated (3 active programs)
 INFO: Program started: Morning Show (morning.m3u)
@@ -262,6 +270,7 @@ The system will operate in traditional library-only mode.
 ## Implementation Dependencies
 
 Required Rust crates:
+
 ```toml
 cron = "0.12"      # Cron expression parsing
 chrono = "0.4"     # Time/duration handling
@@ -297,6 +306,7 @@ m3u = "1.0"        # M3U playlist parsing
 ### Radio Station with Shows
 
 Traditional radio station with scheduled programming:
+
 - Morning show (6-9 AM weekdays)
 - Drive time (5-7 PM daily)
 - Weekend programming
@@ -305,6 +315,7 @@ Traditional radio station with scheduled programming:
 ### Music Rotation by Time
 
 Different music genres at different times:
+
 - Energetic music in morning
 - Relaxed music at lunch
 - Ambient at night
@@ -313,6 +324,7 @@ Different music genres at different times:
 ### Testing and Development
 
 Easy program management:
+
 - Set `active = false` to disable programs during testing
 - Enable one program at a time for validation
 - No need to modify cron or remove configurations
