@@ -45,21 +45,41 @@ impl LibraryScanner {
 
         info!("Found {} audio files", files.len());
 
+        let mut tracks = Vec::new();
+
         for file_path in files {
             match self.process_file(&file_path) {
-                Ok(track) => match self.db.insert_track(&track) {
-                    Ok(_) => {
-                        debug!("Added track: {}", track.file_path);
-                        result.added += 1;
-                    }
-                    Err(e) => {
-                        warn!("Failed to insert track {}: {}", track.file_path, e);
-                        result.errors.push(format!("{}: {}", track.file_path, e));
-                    }
-                },
+                Ok(track) => {
+                    tracks.push(track);
+                }
                 Err(e) => {
                     warn!("Failed to process file {:?}: {}", file_path, e);
                     result.errors.push(format!("{:?}: {}", file_path, e));
+                }
+            }
+        }
+
+        match self.db.insert_tracks_batch(&tracks) {
+            Ok(_) => {
+                result.added = tracks.len();
+                info!("Inserted {} tracks in batch", tracks.len());
+            }
+            Err(e) => {
+                warn!(
+                    "Batch insert failed: {}, falling back to individual inserts",
+                    e
+                );
+                for track in tracks {
+                    match self.db.insert_track(&track) {
+                        Ok(_) => {
+                            debug!("Added track: {}", track.file_path);
+                            result.added += 1;
+                        }
+                        Err(e) => {
+                            warn!("Failed to insert track {}: {}", track.file_path, e);
+                            result.errors.push(format!("{}: {}", track.file_path, e));
+                        }
+                    }
                 }
             }
         }
@@ -90,14 +110,17 @@ impl LibraryScanner {
             errors: Vec::new(),
         };
 
-        let existing_tracks = self.db.get_all_tracks()?;
-        let mut existing_map: HashMap<String, (i64, i64)> = existing_tracks
+        let track_keys = self.db.get_track_keys()?;
+        let mut existing_map: HashMap<String, (i64, i64)> = track_keys
             .into_iter()
-            .filter_map(|t| t.id.map(|id| (t.file_path.clone(), (t.last_modified, id))))
+            .map(|(id, file_path, last_modified)| (file_path, (last_modified, id)))
             .collect();
 
         let mut files = Vec::new();
         self.scan_directory_recursive(&self.music_directory, &mut files)?;
+
+        let mut tracks_to_add = Vec::new();
+        let mut tracks_to_update = Vec::new();
 
         for file_path in files {
             let file_path_str = file_path.to_string_lossy().to_string();
@@ -107,16 +130,9 @@ impl LibraryScanner {
                     if let Some((db_mtime, _)) = existing_map.remove(&file_path_str) {
                         if current_mtime != db_mtime {
                             match self.process_file(&file_path) {
-                                Ok(track) => match self.db.update_track(&track) {
-                                    Ok(_) => {
-                                        debug!("Updated track: {}", track.file_path);
-                                        result.updated += 1;
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to update track {}: {}", track.file_path, e);
-                                        result.errors.push(format!("{}: {}", track.file_path, e));
-                                    }
-                                },
+                                Ok(track) => {
+                                    tracks_to_update.push(track);
+                                }
                                 Err(e) => {
                                     warn!("Failed to process file {:?}: {}", file_path, e);
                                     result.errors.push(format!("{:?}: {}", file_path, e));
@@ -127,16 +143,9 @@ impl LibraryScanner {
                         }
                     } else {
                         match self.process_file(&file_path) {
-                            Ok(track) => match self.db.insert_track(&track) {
-                                Ok(_) => {
-                                    debug!("Added new track: {}", track.file_path);
-                                    result.added += 1;
-                                }
-                                Err(e) => {
-                                    warn!("Failed to insert track {}: {}", track.file_path, e);
-                                    result.errors.push(format!("{}: {}", track.file_path, e));
-                                }
-                            },
+                            Ok(track) => {
+                                tracks_to_add.push(track);
+                            }
                             Err(e) => {
                                 warn!("Failed to process file {:?}: {}", file_path, e);
                                 result.errors.push(format!("{:?}: {}", file_path, e));
@@ -151,15 +160,85 @@ impl LibraryScanner {
             }
         }
 
-        for (deleted_path, _) in existing_map {
-            match self.db.delete_track(&deleted_path) {
+        if !tracks_to_add.is_empty() {
+            match self.db.insert_tracks_batch(&tracks_to_add) {
                 Ok(_) => {
-                    debug!("Deleted track: {}", deleted_path);
-                    result.deleted += 1;
+                    result.added = tracks_to_add.len();
+                    info!("Added {} tracks in batch", tracks_to_add.len());
                 }
                 Err(e) => {
-                    warn!("Failed to delete track {}: {}", deleted_path, e);
-                    result.errors.push(format!("{}: {}", deleted_path, e));
+                    warn!(
+                        "Batch insert failed: {}, falling back to individual inserts",
+                        e
+                    );
+                    for track in tracks_to_add {
+                        match self.db.insert_track(&track) {
+                            Ok(_) => {
+                                debug!("Added new track: {}", track.file_path);
+                                result.added += 1;
+                            }
+                            Err(e) => {
+                                warn!("Failed to insert track {}: {}", track.file_path, e);
+                                result.errors.push(format!("{}: {}", track.file_path, e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if !tracks_to_update.is_empty() {
+            match self.db.update_tracks_batch(&tracks_to_update) {
+                Ok(_) => {
+                    result.updated = tracks_to_update.len();
+                    info!("Updated {} tracks in batch", tracks_to_update.len());
+                }
+                Err(e) => {
+                    warn!(
+                        "Batch update failed: {}, falling back to individual updates",
+                        e
+                    );
+                    for track in tracks_to_update {
+                        match self.db.update_track(&track) {
+                            Ok(_) => {
+                                debug!("Updated track: {}", track.file_path);
+                                result.updated += 1;
+                            }
+                            Err(e) => {
+                                warn!("Failed to update track {}: {}", track.file_path, e);
+                                result.errors.push(format!("{}: {}", track.file_path, e));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let deleted_paths: Vec<String> = existing_map.into_keys().collect();
+
+        if !deleted_paths.is_empty() {
+            match self.db.delete_tracks_batch(&deleted_paths) {
+                Ok(_) => {
+                    result.deleted = deleted_paths.len();
+                    info!("Deleted {} tracks in batch", deleted_paths.len());
+                }
+                Err(e) => {
+                    warn!(
+                        "Batch delete failed: {}, falling back to individual deletes",
+                        e
+                    );
+                    for deleted_path in deleted_paths {
+                        match self.db.delete_track(&deleted_path) {
+                            Ok(_) => {
+                                debug!("Deleted track: {}", deleted_path);
+                                result.deleted += 1;
+                            }
+                            Err(e) => {
+                                warn!("Failed to delete track {}: {}", deleted_path, e);
+                                result.errors.push(format!("{}: {}", deleted_path, e));
+                            }
+                        }
+                    }
                 }
             }
         }

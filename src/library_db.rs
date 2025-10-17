@@ -35,9 +35,10 @@ impl LibraryDatabase {
     }
 
     pub fn initialize_schema(&self) -> Result<(), Box<dyn Error>> {
-        let conn = self.pool.get()?;
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
 
-        conn.execute(
+        tx.execute(
             "CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 file_path TEXT NOT NULL UNIQUE,
@@ -54,27 +55,27 @@ impl LibraryDatabase {
             [],
         )?;
 
-        conn.execute(
+        tx.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_file_path ON tracks(file_path)",
             [],
         )?;
 
-        conn.execute(
+        tx.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist)",
             [],
         )?;
 
-        conn.execute(
+        tx.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album)",
             [],
         )?;
 
-        conn.execute(
+        tx.execute(
             "CREATE INDEX IF NOT EXISTS idx_tracks_last_modified ON tracks(last_modified)",
             [],
         )?;
 
-        conn.execute(
+        tx.execute(
             "CREATE TABLE IF NOT EXISTS library_metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -82,6 +83,8 @@ impl LibraryDatabase {
             )",
             [],
         )?;
+
+        tx.commit()?;
 
         Ok(())
     }
@@ -110,6 +113,35 @@ impl LibraryDatabase {
         Ok(conn.last_insert_rowid())
     }
 
+    pub fn insert_tracks_batch(&self, tracks: &[TrackRecord]) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+
+        for track in tracks {
+            tx.execute(
+                "INSERT INTO tracks (file_path, title, artist, album, duration_seconds, 
+                    file_size, last_modified, file_extension, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    track.file_path,
+                    track.title,
+                    track.artist,
+                    track.album,
+                    track.duration_seconds,
+                    track.file_size,
+                    track.last_modified,
+                    track.file_extension,
+                    track.created_at,
+                    track.updated_at,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
+    }
+
     pub fn update_track(&self, track: &TrackRecord) -> Result<(), Box<dyn Error>> {
         let conn = self.pool.get()?;
 
@@ -133,12 +165,56 @@ impl LibraryDatabase {
         Ok(())
     }
 
+    pub fn update_tracks_batch(&self, tracks: &[TrackRecord]) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+
+        for track in tracks {
+            tx.execute(
+                "UPDATE tracks SET title = ?1, artist = ?2, album = ?3, duration_seconds = ?4,
+                    file_size = ?5, last_modified = ?6, file_extension = ?7, updated_at = ?8
+                 WHERE file_path = ?9",
+                params![
+                    track.title,
+                    track.artist,
+                    track.album,
+                    track.duration_seconds,
+                    track.file_size,
+                    track.last_modified,
+                    track.file_extension,
+                    track.updated_at,
+                    track.file_path,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
+    }
+
     pub fn delete_track(&self, file_path: &str) -> Result<(), Box<dyn Error>> {
         let conn = self.pool.get()?;
         conn.execute(
             "DELETE FROM tracks WHERE file_path = ?1",
             params![file_path],
         )?;
+        Ok(())
+    }
+
+    pub fn delete_tracks_batch(&self, file_paths: &[String]) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.get()?;
+        let tx = conn.transaction()?;
+
+        for file_path in file_paths {
+            tx.execute(
+                "DELETE FROM tracks WHERE file_path = ?1",
+                params![file_path],
+            )?;
+        }
+
+        tx.commit()?;
+
         Ok(())
     }
 
@@ -205,6 +281,18 @@ impl LibraryDatabase {
             .collect::<SqliteResult<Vec<_>>>()?;
 
         Ok(tracks)
+    }
+
+    pub fn get_track_keys(&self) -> Result<Vec<(i64, String, i64)>, Box<dyn Error>> {
+        let conn = self.pool.get()?;
+
+        let mut stmt = conn.prepare("SELECT id, file_path, last_modified FROM tracks")?;
+
+        let keys = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<SqliteResult<Vec<_>>>()?;
+
+        Ok(keys)
     }
 
     pub fn track_count(&self) -> Result<usize, Box<dyn Error>> {
