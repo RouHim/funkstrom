@@ -21,3 +21,17 @@ channels = 2
 
 [ffmpeg]
 path = "/usr/bin/ffmpeg"
+
+[[schedule.programs]]
+name = "Morning Show"
+active = false
+cron = "0 6 * * 1-5"
+duration = "3h"
+playlist = "/path/to/playlists/morning.m3u"
+
+[[schedule.programs]]
+name = "Evening Jazz"
+active = false
+cron = "0 19 * * *"
+duration = "2h"
+playlist = "/path/to/playlists/jazz.m3u"
