@@ -105,6 +105,11 @@ impl IcecastServer {
 
         log::info!("Client User-Agent: {}", user_agent);
 
+        // Check for Range header - we don't support seeking in live streams
+        if headers.contains_key("range") {
+            log::warn!("Client attempted to seek on live stream, ignoring Range header");
+        }
+
         let (tx, rx) = mpsc::unbounded_channel();
         let buffer = self.buffer.clone();
 
@@ -136,6 +141,7 @@ impl IcecastServer {
             .header("Cache-Control", "no-cache, no-store")
             .header("Connection", "close")
             .header("Pragma", "no-cache")
+            .header("Accept-Ranges", "none")
             .header("Access-Control-Allow-Origin", "*")
             .header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             .header("Access-Control-Allow-Headers", "Content-Type")
