@@ -11,7 +11,7 @@ pub fn build_cli() -> Command {
                 .long("config")
                 .value_name("FILE")
                 .help("Sets a custom config file")
-                .default_value("config.toml"),
+                .default_value("./data/config.toml"),
         )
 }
 

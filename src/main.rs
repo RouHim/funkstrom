@@ -4,6 +4,8 @@ mod audio_processor;
 mod audio_reader;
 mod cli;
 mod config;
+mod library_db;
+mod library_scanner;
 mod m3u_parser;
 mod schedule_engine;
 mod server_icecast;
@@ -15,6 +17,8 @@ use audio_processor::FFmpegProcessor;
 use audio_reader::AudioReader;
 use cli::get_config_path;
 use config::Config;
+use library_db::LibraryDatabase;
+use library_scanner::LibraryScanner;
 use schedule_engine::ScheduleEngine;
 use server_icecast::IcecastServer;
 use std::path::PathBuf;
@@ -22,6 +26,8 @@ use std::path::PathBuf;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+
+    std::fs::create_dir_all("./data")?;
 
     let config_path = get_config_path();
     let config = Config::from_file(&config_path)?;
@@ -33,6 +39,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     log::info!("Music directory: {}", config.library.music_directory);
     log::info!("Station: {}", config.station.station_name);
+
+    let db = LibraryDatabase::new("./data/database.db")?;
+    db.initialize_schema()?;
+
+    let music_dir = PathBuf::from(&config.library.music_directory);
+    let scanner = LibraryScanner::new(music_dir.clone(), db.clone());
+
+    let track_count = db.track_count()?;
+    if track_count == 0 {
+        log::info!("Empty library, performing initial full scan...");
+        let result = scanner.full_scan()?;
+        log::info!("Initial scan complete: {} tracks added", result.added);
+        if !result.errors.is_empty() {
+            log::warn!("Scan encountered {} errors", result.errors.len());
+        }
+    } else {
+        if let Ok(Some(last_full)) = db.get_metadata("last_full_scan") {
+            if let Ok(timestamp) = last_full.parse::<i64>() {
+                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                log::info!("Last full scan: {}", datetime);
+            }
+        }
+
+        if let Ok(Some(last_incr)) = db.get_metadata("last_incremental_scan") {
+            if let Ok(timestamp) = last_incr.parse::<i64>() {
+                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                log::info!("Last incremental scan: {}", datetime);
+            }
+        }
+
+        log::info!("Performing incremental library scan...");
+        let result = scanner.incremental_scan()?;
+        if result.added > 0 || result.updated > 0 || result.deleted > 0 {
+            log::info!(
+                "Library changes: +{} ~{} -{} tracks",
+                result.added,
+                result.updated,
+                result.deleted
+            );
+        }
+    }
 
     let schedule_command_rx = if let Some(ref schedule_config) = config.schedule {
         if !schedule_config.programs.is_empty() && schedule_config.programs.iter().any(|p| p.active)
@@ -58,9 +109,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Initialize components with correct API signatures
-    let music_dir = PathBuf::from(&config.library.music_directory);
-    let audio_reader = AudioReader::new(music_dir, config.library.shuffle, config.library.repeat)?;
+    let audio_reader =
+        AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
 
     // FFmpegProcessor::new needs 4 parameters: ffmpeg_path, sample_rate, bitrate, channels
     let audio_processor = FFmpegProcessor::new(
@@ -152,10 +202,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server.port
     );
 
+    let nightly_rescan_handle = tokio::spawn(async move {
+        loop {
+            let now = chrono::Local::now();
+            let next_scan = now
+                .date_naive()
+                .succ_opt()
+                .unwrap()
+                .and_hms_opt(3, 0, 0)
+                .unwrap()
+                .and_local_timezone(chrono::Local)
+                .unwrap();
+            let duration = (next_scan - now).to_std().unwrap();
+
+            log::info!(
+                "Next library scan scheduled at {}",
+                next_scan.format("%Y-%m-%d %H:%M:%S")
+            );
+
+            tokio::time::sleep(duration).await;
+
+            log::info!("Performing nightly library scan...");
+            match scanner.incremental_scan() {
+                Ok(result) => {
+                    if result.added > 0 || result.updated > 0 || result.deleted > 0 {
+                        log::info!(
+                            "Nightly scan complete: +{} added, ~{} updated, -{} deleted",
+                            result.added,
+                            result.updated,
+                            result.deleted
+                        );
+                    } else {
+                        log::info!("Nightly scan complete: no changes detected");
+                    }
+                }
+                Err(e) => log::error!("Nightly scan failed: {}", e),
+            }
+        }
+    });
+
     // Wait for all tasks to complete (they should run indefinitely)
     tokio::select! {
         _ = server_handle => log::error!("Icecast server stopped"),
         _ = buffer_writer_handle => log::error!("Buffer writer stopped"),
+        _ = nightly_rescan_handle => log::error!("Nightly rescan stopped"),
     }
 
     Ok(())
