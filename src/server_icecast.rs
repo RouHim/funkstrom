@@ -85,9 +85,9 @@ impl IcecastServer {
             .or(openapi_spec_route)
             .or(info_route);
 
-        println!("Starting Icecast server on port {}", port);
-        println!("Stream URL: http://127.0.0.1:{}/stream", port);
-        println!("API Docs: http://127.0.0.1:{}/api-docs", port);
+        log::info!("Starting Icecast server on port {}", port);
+        log::info!("Stream URL: http://127.0.0.1:{}/stream", port);
+        log::info!("API Docs: http://127.0.0.1:{}/api-docs", port);
 
         warp::serve(routes).run(([127, 0, 0, 1], port)).await;
     }
@@ -96,14 +96,14 @@ impl IcecastServer {
         &self,
         headers: HeaderMap,
     ) -> Result<impl Reply, warp::Rejection> {
-        println!("New client connected for streaming");
+        log::info!("New client connected for streaming");
 
         let user_agent = headers
             .get("user-agent")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("Unknown");
 
-        println!("Client User-Agent: {}", user_agent);
+        log::info!("Client User-Agent: {}", user_agent);
 
         let (tx, rx) = mpsc::unbounded_channel();
         let buffer = self.buffer.clone();
@@ -115,13 +115,13 @@ impl IcecastServer {
             loop {
                 if let Some(chunk) = buffer.read_chunk(8192) {
                     if tx.send(Ok::<_, warp::Error>(chunk)).is_err() {
-                        println!("Client disconnected");
+                        log::info!("Client disconnected");
                         break;
                     }
                     last_data_time = Instant::now();
                 } else {
                     if last_data_time.elapsed() > timeout_duration {
-                        println!("No data available for too long, disconnecting client");
+                        log::warn!("No data available for too long, disconnecting client");
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
