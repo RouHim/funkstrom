@@ -24,8 +24,6 @@ Vibe: Oceanic, calm, professional with mysterious depth
 
 ## Code Style Guidelines
 
-## Warnings
-
 - Breaking changes are allowed because the app is not released yet; no migration is needed when implementing new
   features or changes.
 - `cargo run` hangs until the process gets killed, thus always start the application in the background using `nohup`
@@ -34,6 +32,7 @@ Vibe: Oceanic, calm, professional with mysterious depth
 - **Channels**: Use crossbeam-channel for thread communication, tokio channels for async
 - **Logging**: Use log crate with env_logger, structured logging with context
 - **Naming**: snake_case for variables/functions, PascalCase for structs/enums
+- **Logging**: Use the `log` crate with `env_logger` for logging.
 
 ## Code Quality Principles
 
