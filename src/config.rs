@@ -8,7 +8,6 @@ pub struct Config {
     pub library: LibraryConfig,
     pub station: StationConfig,
     pub stream: StreamConfig,
-    pub ffmpeg: FFmpegConfig,
     pub schedule: Option<ScheduleConfig>,
 }
 
@@ -16,6 +15,7 @@ pub struct Config {
 pub struct ServerConfig {
     pub port: u16,
     pub bind_address: String,
+    pub ffmpeg_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -39,11 +39,6 @@ pub struct StreamConfig {
     pub format: String,
     pub sample_rate: u32,
     pub channels: u8,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct FFmpegConfig {
-    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -74,6 +69,7 @@ impl Default for Config {
             server: ServerConfig {
                 port: 8284,
                 bind_address: "127.0.0.1".to_string(),
+                ffmpeg_path: None,
             },
             library: LibraryConfig {
                 music_directory: "/path/to/music".to_string(),
@@ -92,7 +88,6 @@ impl Default for Config {
                 sample_rate: 44100,
                 channels: 2,
             },
-            ffmpeg: FFmpegConfig { path: None },
             schedule: None,
         }
     }

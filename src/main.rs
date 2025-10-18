@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // FFmpegProcessor::new needs 4 parameters: ffmpeg_path, sample_rate, bitrate, channels
     let audio_processor = FFmpegProcessor::new(
-        config.ffmpeg.path.clone(),
+        config.server.ffmpeg_path.clone(),
         config.stream.sample_rate,
         config.stream.bitrate,
         config.stream.channels,
