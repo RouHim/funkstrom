@@ -132,11 +132,11 @@ mod tests {
 
         let playlist_path = temp_dir.path().join("test.m3u");
         let mut file = File::create(&playlist_path).unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
         writeln!(file, "track1.mp3").unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
         writeln!(file, "track2.mp3").unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
 
         let result = M3uParser::parse(&playlist_path).unwrap();
 

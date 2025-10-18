@@ -323,7 +323,7 @@ impl LibraryScanner {
                     .unwrap_or_else(|| "Unknown Artist".to_string());
                 let album = tag
                     .album()
-                    .map(|s| s.to_string())
+                    .map(|a| a.title.to_string())
                     .unwrap_or_else(|| "Unknown Album".to_string());
                 (title, artist, album)
             }
@@ -345,6 +345,7 @@ impl LibraryScanner {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         Ok(TrackRecord {
+            id: None,
             file_path,
             title,
             artist,
@@ -362,5 +363,211 @@ impl LibraryScanner {
         let metadata = fs::metadata(path)?;
         let mtime = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs() as i64;
         Ok(mtime)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::{NamedTempFile, TempDir};
+
+    fn create_test_db() -> (LibraryDatabase, NamedTempFile) {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_path = temp_file.path().to_str().unwrap();
+        let db = LibraryDatabase::new(db_path).unwrap();
+        db.initialize_schema().unwrap();
+        (db, temp_file)
+    }
+
+    fn create_test_audio_file(dir: &Path, name: &str) -> PathBuf {
+        let file_path = dir.join(name);
+        File::create(&file_path).unwrap();
+        file_path
+    }
+
+    #[test]
+    fn given_music_directory_with_files_when_full_scan_then_all_tracks_added_to_database() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        create_test_audio_file(temp_dir.path(), "song1.mp3");
+        create_test_audio_file(temp_dir.path(), "song2.flac");
+        create_test_audio_file(temp_dir.path(), "song3.ogg");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        let result = scanner.full_scan().unwrap();
+
+        assert_eq!(result.added, 3);
+        assert_eq!(result.updated, 0);
+        assert_eq!(result.deleted, 0);
+        assert_eq!(result.unchanged, 0);
+
+        let tracks = db.get_all_tracks().unwrap();
+        assert_eq!(tracks.len(), 3);
+    }
+
+    #[test]
+    fn given_empty_directory_when_full_scan_then_no_tracks_added() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        let result = scanner.full_scan().unwrap();
+
+        assert_eq!(result.added, 0);
+        let tracks = db.get_all_tracks().unwrap();
+        assert_eq!(tracks.len(), 0);
+    }
+
+    #[test]
+    fn given_directory_with_subdirectories_when_full_scan_then_all_tracks_found() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        let sub_dir = temp_dir.path().join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+
+        create_test_audio_file(temp_dir.path(), "song1.mp3");
+        create_test_audio_file(&sub_dir, "song2.mp3");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        let result = scanner.full_scan().unwrap();
+
+        assert_eq!(result.added, 2);
+    }
+
+    #[test]
+    fn given_directory_with_non_audio_files_when_full_scan_then_only_audio_files_added() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        create_test_audio_file(temp_dir.path(), "song1.mp3");
+        create_test_audio_file(temp_dir.path(), "readme.txt");
+        create_test_audio_file(temp_dir.path(), "image.jpg");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        let result = scanner.full_scan().unwrap();
+
+        assert_eq!(result.added, 1);
+    }
+
+    #[test]
+    fn given_unchanged_files_when_incremental_scan_then_no_changes_detected() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        create_test_audio_file(temp_dir.path(), "song1.mp3");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        scanner.full_scan().unwrap();
+
+        let result = scanner.incremental_scan().unwrap();
+
+        assert_eq!(result.added, 0);
+        assert_eq!(result.updated, 0);
+        assert_eq!(result.deleted, 0);
+        assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn given_new_files_when_incremental_scan_then_new_files_added() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        create_test_audio_file(temp_dir.path(), "song1.mp3");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        scanner.full_scan().unwrap();
+
+        create_test_audio_file(temp_dir.path(), "song2.mp3");
+        create_test_audio_file(temp_dir.path(), "song3.flac");
+
+        let result = scanner.incremental_scan().unwrap();
+
+        assert_eq!(result.added, 2);
+        assert_eq!(result.unchanged, 1);
+
+        let tracks = db.get_all_tracks().unwrap();
+        assert_eq!(tracks.len(), 3);
+    }
+
+    #[test]
+    fn given_modified_files_when_incremental_scan_then_files_updated() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = create_test_audio_file(temp_dir.path(), "song1.mp3");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        scanner.full_scan().unwrap();
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let mut file = File::create(&file_path).unwrap();
+        file.write_all(b"new content").unwrap();
+
+        let result = scanner.incremental_scan().unwrap();
+
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.added, 0);
+        assert_eq!(result.deleted, 0);
+    }
+
+    #[test]
+    fn given_deleted_files_when_incremental_scan_then_files_removed_from_database() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = create_test_audio_file(temp_dir.path(), "song1.mp3");
+        create_test_audio_file(temp_dir.path(), "song2.mp3");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        scanner.full_scan().unwrap();
+
+        fs::remove_file(&file_path).unwrap();
+
+        let result = scanner.incremental_scan().unwrap();
+
+        assert_eq!(result.deleted, 1);
+        assert_eq!(result.unchanged, 1);
+
+        let tracks = db.get_all_tracks().unwrap();
+        assert_eq!(tracks.len(), 1);
+        assert!(tracks[0].file_path.contains("song2.mp3"));
+    }
+
+    #[test]
+    fn given_mixed_changes_when_incremental_scan_then_all_changes_detected() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+        let file_to_delete = create_test_audio_file(temp_dir.path(), "delete.mp3");
+        let file_to_modify = create_test_audio_file(temp_dir.path(), "modify.mp3");
+        create_test_audio_file(temp_dir.path(), "unchanged.mp3");
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        scanner.full_scan().unwrap();
+
+        fs::remove_file(&file_to_delete).unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let mut file = File::create(&file_to_modify).unwrap();
+        file.write_all(b"modified").unwrap();
+        create_test_audio_file(temp_dir.path(), "new.mp3");
+
+        let result = scanner.incremental_scan().unwrap();
+
+        assert_eq!(result.added, 1);
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.deleted, 1);
+        assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn given_supported_audio_formats_when_scanning_then_all_formats_recognized() {
+        let (db, _temp_db) = create_test_db();
+        let temp_dir = TempDir::new().unwrap();
+
+        let formats = ["mp3", "flac", "ogg", "wav", "aac", "m4a", "opus", "wma"];
+        for (i, format) in formats.iter().enumerate() {
+            create_test_audio_file(temp_dir.path(), &format!("song{}.{}", i, format));
+        }
+
+        let scanner = LibraryScanner::new(temp_dir.path().to_path_buf(), db.clone());
+        let result = scanner.full_scan().unwrap();
+
+        assert_eq!(result.added, 8);
     }
 }

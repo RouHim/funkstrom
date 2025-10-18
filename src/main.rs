@@ -55,6 +55,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::warn!("Scan encountered {} errors", result.errors.len());
         }
     } else {
+        if let Ok(Some(last_full)) = db.get_metadata("last_full_scan") {
+            if let Ok(timestamp) = last_full.parse::<i64>() {
+                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                log::info!("Last full scan: {}", datetime);
+            }
+        }
+
+        if let Ok(Some(last_incr)) = db.get_metadata("last_incremental_scan") {
+            if let Ok(timestamp) = last_incr.parse::<i64>() {
+                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                log::info!("Last incremental scan: {}", datetime);
+            }
+        }
+
         log::info!("Performing incremental library scan...");
         let result = scanner.incremental_scan()?;
         if result.added > 0 || result.updated > 0 || result.deleted > 0 {
@@ -184,10 +202,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.server.port
     );
 
+    let nightly_rescan_handle = tokio::spawn(async move {
+        loop {
+            let now = chrono::Local::now();
+            let next_scan = now
+                .date_naive()
+                .succ_opt()
+                .unwrap()
+                .and_hms_opt(3, 0, 0)
+                .unwrap()
+                .and_local_timezone(chrono::Local)
+                .unwrap();
+            let duration = (next_scan - now).to_std().unwrap();
+
+            log::info!(
+                "Next library scan scheduled at {}",
+                next_scan.format("%Y-%m-%d %H:%M:%S")
+            );
+
+            tokio::time::sleep(duration).await;
+
+            log::info!("Performing nightly library scan...");
+            match scanner.incremental_scan() {
+                Ok(result) => {
+                    if result.added > 0 || result.updated > 0 || result.deleted > 0 {
+                        log::info!(
+                            "Nightly scan complete: +{} added, ~{} updated, -{} deleted",
+                            result.added,
+                            result.updated,
+                            result.deleted
+                        );
+                    } else {
+                        log::info!("Nightly scan complete: no changes detected");
+                    }
+                }
+                Err(e) => log::error!("Nightly scan failed: {}", e),
+            }
+        }
+    });
+
     // Wait for all tasks to complete (they should run indefinitely)
     tokio::select! {
         _ = server_handle => log::error!("Icecast server stopped"),
         _ = buffer_writer_handle => log::error!("Buffer writer stopped"),
+        _ = nightly_rescan_handle => log::error!("Nightly rescan stopped"),
     }
 
     Ok(())

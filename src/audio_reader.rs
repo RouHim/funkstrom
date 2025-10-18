@@ -18,7 +18,7 @@ enum PlaylistSource {
     },
 }
 
-fn shuffle_playlist(mut playlist: VecDeque<PathBuf>) -> VecDeque<PathBuf> {
+fn shuffle_playlist(playlist: &mut VecDeque<PathBuf>) {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
@@ -31,7 +31,7 @@ fn shuffle_playlist(mut playlist: VecDeque<PathBuf>) -> VecDeque<PathBuf> {
         let j = (seed + i * 17) % (i + 1);
         playlist_vec.swap(i, j);
     }
-    playlist_vec.into_iter().collect()
+    *playlist = playlist_vec.into_iter().collect();
 }
 
 pub struct AudioReader {
@@ -65,7 +65,7 @@ impl AudioReader {
             .collect();
 
         if shuffle {
-            playlist = shuffle_playlist(playlist);
+            shuffle_playlist(&mut playlist);
         }
 
         Ok(Self {
@@ -106,7 +106,7 @@ impl AudioReader {
                     if self.library_repeat {
                         self.current_index = 0;
                         if self.library_shuffle {
-                            self.playlist = shuffle_playlist(self.playlist.clone());
+                            shuffle_playlist(&mut self.playlist);
                         }
                     } else {
                         return None;
@@ -155,16 +155,15 @@ impl AudioReader {
         match self.db.get_all_tracks() {
             Ok(tracks) => {
                 if !tracks.is_empty() {
-                    let mut new_playlist: VecDeque<PathBuf> = tracks
+                    self.playlist = tracks
                         .into_iter()
                         .map(|t| PathBuf::from(t.file_path))
                         .collect();
 
                     if self.library_shuffle {
-                        new_playlist = shuffle_playlist(new_playlist);
+                        shuffle_playlist(&mut self.playlist);
                     }
 
-                    self.playlist = new_playlist;
                     self.current_index = 0;
                     self.playlist_source = PlaylistSource::Library;
                 } else {
