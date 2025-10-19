@@ -26,6 +26,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 
+// Avoid musl's default allocator due to lackluster performance
+// https://nickb.dev/blog/default-musl-allocator-considered-harmful-to-performance
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 type AudioPipeline = (
     Receiver<PathBuf>,
     Receiver<AudioChunk>,

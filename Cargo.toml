@@ -9,6 +9,7 @@ keywords = ["radio", "icecast", "streaming", "audio"]
 categories = ["multimedia::audio", "network-programming"]
 
 [dependencies]
+mimalloc = "0.1.48"
 warp = "0.3"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -32,3 +33,9 @@ r2d2_sqlite = "0.31"
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[profile.production]
+inherits = "release"
+codegen-units = 1 # Compile crates one after another so the compiler can optimize better
+lto = true # Enables link to optimizations
+strip = true # Strip debug symbols
