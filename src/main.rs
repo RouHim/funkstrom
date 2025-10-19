@@ -13,33 +13,69 @@ mod server_metadata;
 mod server_swagger;
 
 use audio_buffer::StreamBuffer;
-use audio_processor::FFmpegProcessor;
+use audio_metadata::TrackMetadata;
+use audio_processor::{AudioChunk, FFmpegProcessor};
 use audio_reader::AudioReader;
 use cli::get_config_path;
 use config::Config;
+use crossbeam_channel::Receiver;
 use library_db::LibraryDatabase;
 use library_scanner::LibraryScanner;
-use schedule_engine::ScheduleEngine;
+use schedule_engine::{PlaylistCommand, ScheduleEngine};
 use server_icecast::IcecastServer;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tokio::task::JoinHandle;
+
+type AudioPipeline = (
+    Receiver<PathBuf>,
+    Receiver<AudioChunk>,
+    Arc<Mutex<TrackMetadata>>,
+);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-
     std::fs::create_dir_all("./data")?;
 
+    // Load config
     let config_path = get_config_path();
     let config = Config::from_file(&config_path)?;
 
-    log::info!(
-        "Starting iRadio server on {}:{}",
-        config.server.bind_address,
-        config.server.port
-    );
-    log::info!("Music directory: {}", config.library.music_directory);
-    log::info!("Station: {}", config.station.station_name);
+    log_startup_info(&config);
 
+    // Initialize components
+    let (db, scanner) = initialize_library(&config)?;
+    let schedule_rx = setup_schedule_engine(&config);
+    let (_track_rx, audio_rx, current_metadata) = setup_audio_pipeline(&config, db, schedule_rx)?;
+
+    // Set up streaming buffer
+    let stream_buffer = StreamBuffer::new(1000, 50 * 1024 * 1024);
+    stream_buffer.start();
+
+    // Start server
+    let buffer_writer_handle = start_buffer_writer(&stream_buffer, audio_rx);
+    let server_handle = start_server(&config, stream_buffer, current_metadata);
+
+    log_server_urls(&config);
+
+    // Start nightly rescan task
+    let nightly_rescan_handle = start_nightly_rescan(scanner);
+
+    // Wait for all tasks to complete
+    tokio::select! {
+        _ = server_handle => log::error!("Icecast server stopped"),
+        _ = buffer_writer_handle => log::error!("Buffer writer stopped"),
+        _ = nightly_rescan_handle => log::error!("Nightly rescan stopped"),
+    }
+
+    Ok(())
+}
+
+
+fn initialize_library(
+    config: &Config,
+) -> Result<(LibraryDatabase, LibraryScanner), Box<dyn std::error::Error>> {
     let db = LibraryDatabase::new("./data/database.db")?;
     db.initialize_schema()?;
 
@@ -55,23 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::warn!("Scan encountered {} errors", result.errors.len());
         }
     } else {
-        if let Ok(Some(last_full)) = db.get_metadata("last_full_scan") {
-            if let Ok(timestamp) = last_full.parse::<i64>() {
-                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                log::info!("Last full scan: {}", datetime);
-            }
-        }
-
-        if let Ok(Some(last_incr)) = db.get_metadata("last_incremental_scan") {
-            if let Ok(timestamp) = last_incr.parse::<i64>() {
-                let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                log::info!("Last incremental scan: {}", datetime);
-            }
-        }
+        log_last_scan_times(&db);
 
         log::info!("Performing incremental library scan...");
         let result = scanner.incremental_scan()?;
@@ -85,34 +105,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let schedule_command_rx = if let Some(ref schedule_config) = config.schedule {
-        if !schedule_config.programs.is_empty() && schedule_config.programs.iter().any(|p| p.active)
-        {
-            match ScheduleEngine::new(schedule_config.programs.clone()) {
-                Ok(engine) => {
-                    let rx = engine.get_command_receiver();
-                    engine.start();
-                    Some(rx)
-                }
-                Err(e) => {
-                    log::warn!("Failed to initialize schedule engine: {}", e);
-                    log::info!("Running in library-only mode");
-                    None
-                }
-            }
-        } else {
-            log::info!("No active programs found, running in library-only mode");
+    Ok((db, scanner))
+}
+
+fn log_last_scan_times(db: &LibraryDatabase) {
+    if let Ok(Some(last_full)) = db.get_metadata("last_full_scan") {
+        if let Ok(timestamp) = last_full.parse::<i64>() {
+            let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            log::info!("Last full scan: {}", datetime);
+        }
+    }
+
+    if let Ok(Some(last_incr)) = db.get_metadata("last_incremental_scan") {
+        if let Ok(timestamp) = last_incr.parse::<i64>() {
+            let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            log::info!("Last incremental scan: {}", datetime);
+        }
+    }
+}
+
+fn setup_schedule_engine(config: &Config) -> Option<Receiver<PlaylistCommand>> {
+    let schedule_config = config.schedule.as_ref()?;
+
+    if schedule_config.programs.is_empty() || !schedule_config.programs.iter().any(|p| p.active) {
+        log::info!("No active programs found, running in library-only mode");
+        return None;
+    }
+
+    match ScheduleEngine::new(schedule_config.programs.clone()) {
+        Ok(engine) => {
+            let rx = engine.get_command_receiver();
+            engine.start();
+            Some(rx)
+        }
+        Err(e) => {
+            log::warn!("Failed to initialize schedule engine: {}", e);
+            log::info!("Running in library-only mode");
             None
         }
-    } else {
-        log::info!("No schedule configuration found, running in library-only mode");
-        None
-    };
+    }
+}
 
-    let audio_reader =
-        AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
+fn setup_audio_pipeline(
+    config: &Config,
+    db: LibraryDatabase,
+    schedule_rx: Option<Receiver<PlaylistCommand>>,
+) -> Result<AudioPipeline, Box<dyn std::error::Error>> {
+    let music_dir = PathBuf::from(&config.library.music_directory);
+    let audio_reader = AudioReader::new(
+        music_dir,
+        config.library.shuffle,
+        config.library.repeat,
+        db,
+    )?;
 
-    // FFmpegProcessor::new needs 4 parameters: ffmpeg_path, sample_rate, bitrate, channels
     let audio_processor = FFmpegProcessor::new(
         config.server.ffmpeg_path.clone(),
         config.stream.sample_rate,
@@ -120,33 +170,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.stream.channels,
     );
 
-    // Check FFmpeg availability
     audio_processor.check_ffmpeg_available()?;
 
-    // Create stream buffer
-    let stream_buffer = StreamBuffer::new(
-        1000,             // max chunks
-        50 * 1024 * 1024, // 50MB max bytes
-    );
-
-    // Start services using correct service architecture pattern
-
-    // Get metadata reference before audio_reader is consumed
     let current_metadata = audio_reader.get_current_metadata();
+    let track_rx = audio_reader.start_playlist_service(schedule_rx);
+    let audio_rx = audio_processor.start_streaming_service(track_rx.clone());
 
-    let track_rx = audio_reader.start_playlist_service(schedule_command_rx);
+    Ok((track_rx, audio_rx, current_metadata))
+}
 
-    // 2. Start FFmpeg processor service (consumes self, needs track_rx input)
-    let audio_rx = audio_processor.start_streaming_service(track_rx);
-
-    // 3. Start buffer service (returns (), not JoinHandle)
-    stream_buffer.start();
-
-    // 4. Get buffer input sender and connect audio processor output
+fn start_buffer_writer(
+    stream_buffer: &StreamBuffer,
+    audio_rx: Receiver<AudioChunk>,
+) -> JoinHandle<()> {
     let buffer_input_tx = stream_buffer.get_input_sender();
-    let buffer_writer_handle = tokio::spawn(async move {
+
+    tokio::spawn(async move {
         loop {
-            // Use spawn_blocking for crossbeam channel recv
             match tokio::task::spawn_blocking({
                 let audio_rx = audio_rx.clone();
                 move || audio_rx.recv()
@@ -169,9 +209,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-    });
+    })
+}
 
-    // 5. Start Icecast server (async method, returns ())
+fn start_server(
+    config: &Config,
+    stream_buffer: StreamBuffer,
+    current_metadata: Arc<Mutex<TrackMetadata>>,
+) -> JoinHandle<()> {
     let server = IcecastServer::new(
         stream_buffer,
         config.station.station_name.clone(),
@@ -181,28 +226,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         current_metadata,
     );
 
-    let server_handle = tokio::spawn(async move {
-        server.start_server(config.server.port).await;
-    });
+    let port = config.server.port;
+    tokio::spawn(async move {
+        server.start_server(port).await;
+    })
+}
 
-    log::info!("iRadio server started successfully!");
-    log::info!(
-        "Stream URL: http://{}:{}/stream",
-        config.server.bind_address,
-        config.server.port
-    );
-    log::info!(
-        "Status URL: http://{}:{}/status",
-        config.server.bind_address,
-        config.server.port
-    );
-    log::info!(
-        "Info URL: http://{}:{}/",
-        config.server.bind_address,
-        config.server.port
-    );
-
-    let nightly_rescan_handle = tokio::spawn(async move {
+fn start_nightly_rescan(scanner: LibraryScanner) -> JoinHandle<()> {
+    tokio::spawn(async move {
         loop {
             let now = chrono::Local::now();
             let next_scan = now
@@ -239,14 +270,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Err(e) => log::error!("Nightly scan failed: {}", e),
             }
         }
-    });
+    })
+}
 
-    // Wait for all tasks to complete (they should run indefinitely)
-    tokio::select! {
-        _ = server_handle => log::error!("Icecast server stopped"),
-        _ = buffer_writer_handle => log::error!("Buffer writer stopped"),
-        _ = nightly_rescan_handle => log::error!("Nightly rescan stopped"),
-    }
+fn log_startup_info(config: &Config) {
+    log::info!(
+        "Starting iRadio server on {}:{}",
+        config.server.bind_address,
+        config.server.port
+    );
+    log::info!("Music directory: {}", config.library.music_directory);
+    log::info!("Station: {}", config.station.station_name);
+}
 
-    Ok(())
+fn log_server_urls(config: &Config) {
+    log::info!("iRadio server started successfully!");
+    log::info!(
+        "Stream URL: http://{}:{}/stream",
+        config.server.bind_address,
+        config.server.port
+    );
+    log::info!(
+        "Status URL: http://{}:{}/status",
+        config.server.bind_address,
+        config.server.port
+    );
+    log::info!(
+        "Info URL: http://{}:{}/",
+        config.server.bind_address,
+        config.server.port
+    );
 }
