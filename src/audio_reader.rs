@@ -2,7 +2,7 @@ use crate::audio_metadata::TrackMetadata;
 use crate::library_db::LibraryDatabase;
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
-use crossbeam_channel::{unbounded, Receiver};
+use crossbeam_channel::{bounded, Receiver};
 use log::{error, info};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -180,10 +180,13 @@ impl AudioReader {
         mut self,
         schedule_command_rx: Option<Receiver<PlaylistCommand>>,
     ) -> Receiver<PathBuf> {
-        let (track_tx, track_rx) = unbounded::<PathBuf>();
+        // Use bounded channel with capacity of 2 to keep 1-2 tracks buffered ahead
+        // This provides backpressure and prevents flooding the channel
+        let (track_tx, track_rx) = bounded::<PathBuf>(2);
 
         tokio::spawn(async move {
             loop {
+                // Check for schedule commands
                 if let Some(ref cmd_rx) = schedule_command_rx {
                     match cmd_rx.try_recv() {
                         Ok(PlaylistCommand::SwitchToPlaylist {
@@ -200,11 +203,31 @@ impl AudioReader {
                     }
                 }
 
+                // Get next track
                 if let Some(track) = self.next_track() {
                     info!("Next track: {:?}", track);
-                    if track_tx.send(track).is_err() {
-                        error!("Failed to send track to channel");
-                        break;
+
+                    // This will block when channel is full (backpressure)
+                    // Blocking is moved to tokio blocking thread to avoid blocking async runtime
+                    let result = tokio::task::spawn_blocking({
+                        let track_tx = track_tx.clone();
+                        let track = track.clone();
+                        move || track_tx.send(track)
+                    })
+                    .await;
+
+                    match result {
+                        Ok(Ok(())) => {
+                            // Track sent successfully
+                        }
+                        Ok(Err(_)) => {
+                            error!("Failed to send track to channel - receiver dropped");
+                            break;
+                        }
+                        Err(e) => {
+                            error!("Task join error: {}", e);
+                            break;
+                        }
                     }
                 } else {
                     info!("End of playlist reached");
@@ -215,7 +238,7 @@ impl AudioReader {
                     }
                 }
 
-                // Small delay to avoid busy waiting
+                // Small delay to check for schedule commands periodically
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         });

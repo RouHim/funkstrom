@@ -1,30 +1,124 @@
+# Funkstrom Configuration File
+# This is an example configuration showcasing all available options
+
+# ============================================================================
+# Server Configuration
+# ============================================================================
 [server]
+# Port to listen on for HTTP requests
 port = 8284
+
+# Bind address (use "0.0.0.0" to listen on all interfaces)
 bind_address = "127.0.0.1"
+
+# Path to ffmpeg binary (optional, will use PATH if not specified)
 ffmpeg_path = "/usr/bin/ffmpeg"
 
+# ============================================================================
+# Library Configuration
+# ============================================================================
 [library]
+# Directory containing your music files
 music_directory = "/path/to/music"
+
+# Shuffle playback order
 shuffle = true
+
+# Repeat playlist when it ends
 repeat = true
 
+# ============================================================================
+# Station Information
+# ============================================================================
 [station]
+# Station name displayed to listeners
 station_name = "My Radio Station"
+
+# Station description
 description = "Great music 24/7"
+
+# Music genre
 genre = "Various"
+
+# Station website URL
 url = "http://localhost:8284"
 
-[stream]
+# ============================================================================
+# Stream Configuration (Multi-Stream Support)
+# ============================================================================
+# You can define multiple streams with different quality settings.
+# Each stream will be available at: http://<bind_address>:<port>/<stream_name>
+#
+# Stream names must contain only alphanumeric characters, underscores, or hyphens.
+# Supported formats: mp3, aac, opus, ogg
+# Valid bitrates: 32-320 kbps
+# Valid sample rates: 8000, 11025, 16000, 22050, 32000, 44100, 48000 Hz
+# Valid channels: 1 (mono) or 2 (stereo)
+
+# High-quality stream (320kbps MP3)
+[stream.high]
+bitrate = 320
+format = "mp3"
+sample_rate = 48000
+channels = 2
+enabled = true
+
+# Standard quality stream (128kbps MP3)
+[stream.standard]
 bitrate = 128
 format = "mp3"
 sample_rate = 44100
 channels = 2
+enabled = true
+
+# Low bandwidth stream (64kbps AAC)
+[stream.low]
+bitrate = 64
+format = "aac"
+sample_rate = 22050
+channels = 2
+enabled = true
+
+# Mobile-optimized stream (48kbps AAC Mono)
+[stream.mobile]
+bitrate = 48
+format = "aac"
+sample_rate = 22050
+channels = 1
+enabled = false  # Disabled by default
+
+# Experimental Opus stream (96kbps)
+# Note: Not all players support Opus format
+[stream.opus]
+bitrate = 96
+format = "opus"
+sample_rate = 48000
+channels = 2
+enabled = false  # Disabled by default
+
+# ============================================================================
+# Schedule Configuration (Optional)
+# ============================================================================
+# Schedule specific playlists to play at certain times.
+# Uses cron syntax for scheduling.
+# When a scheduled program is active, it temporarily overrides the main library.
 
 [[schedule.programs]]
+# Program name (for logging)
 name = "Morning Show"
+
+# Enable or disable this program
 active = false
+
+# Cron expression (minute hour day month weekday)
+# Example: "0 6 * * 1-5" = 6:00 AM Monday-Friday
 cron = "0 6 * * 1-5"
+
+# How long the program should run
+# Format: "1h", "30m", "2h30m", etc.
 duration = "3h"
+
+# Path to M3U playlist file
 playlist = "/path/to/playlists/morning.m3u"
 
 [[schedule.programs]]

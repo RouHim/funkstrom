@@ -34,9 +34,15 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 type AudioPipeline = (
     Receiver<PathBuf>,
-    Receiver<AudioChunk>,
+    Vec<StreamPipeline>,
     Arc<Mutex<TrackMetadata>>,
 );
+
+struct StreamPipeline {
+    name: String,
+    receiver: Receiver<AudioChunk>,
+    bitrate: u32,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -52,15 +58,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize components
     let (db, scanner) = initialize_library(&config)?;
     let schedule_rx = setup_schedule_engine(&config);
-    let (_track_rx, audio_rx, current_metadata) = setup_audio_pipeline(&config, db, schedule_rx)?;
+    let (_track_rx, stream_pipelines, current_metadata) =
+        setup_audio_pipeline(&config, db, schedule_rx)?;
 
-    // Set up streaming buffer
-    let stream_buffer = StreamBuffer::new(1000, 50 * 1024 * 1024);
-    stream_buffer.start();
+    // Set up streaming buffers and buffer writers for each stream
+    let mut buffer_writer_handles = Vec::new();
+    let mut stream_buffers = Vec::new();
+
+    for pipeline in stream_pipelines {
+        let stream_buffer = StreamBuffer::new(1000, 50 * 1024 * 1024);
+        stream_buffer.start();
+
+        let handle = start_buffer_writer(&stream_buffer, pipeline.receiver);
+        buffer_writer_handles.push(handle);
+
+        stream_buffers.push((pipeline.name, stream_buffer, pipeline.bitrate));
+    }
 
     // Start server
-    let buffer_writer_handle = start_buffer_writer(&stream_buffer, audio_rx);
-    let server_handle = start_server(&config, stream_buffer, current_metadata);
+    let server_handle = start_server(&config, stream_buffers, current_metadata);
 
     log_server_urls(&config);
 
@@ -70,7 +86,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for all tasks to complete
     tokio::select! {
         _ = server_handle => log::error!("Icecast server stopped"),
-        _ = buffer_writer_handle => log::error!("Buffer writer stopped"),
+        _ = async {
+            for handle in buffer_writer_handles {
+                let _ = handle.await;
+            }
+        } => log::error!("All buffer writers stopped"),
         _ = nightly_rescan_handle => log::error!("Nightly rescan stopped"),
     }
 
@@ -163,21 +183,53 @@ fn setup_audio_pipeline(
     let audio_reader =
         AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
 
-    let audio_processor = FFmpegProcessor::new(
-        config.server.ffmpeg_path.clone(),
-        config.stream.sample_rate,
-        config.stream.bitrate,
-        config.stream.channels,
-        config.stream.format.clone(),
-    );
-
-    audio_processor.check_ffmpeg_available()?;
-
     let current_metadata = audio_reader.get_current_metadata();
     let track_rx = audio_reader.start_playlist_service(schedule_rx);
-    let audio_rx = audio_processor.start_streaming_service(track_rx.clone());
 
-    Ok((track_rx, audio_rx, current_metadata))
+    // Create a processor for each enabled stream
+    let mut stream_pipelines = Vec::new();
+
+    for (name, stream_config) in &config.stream {
+        if !stream_config.enabled {
+            log::info!("Stream '{}' is disabled, skipping", name);
+            continue;
+        }
+
+        log::info!(
+            "Setting up stream '{}': {} @ {}kbps, {}Hz",
+            name,
+            stream_config.format,
+            stream_config.bitrate,
+            stream_config.sample_rate
+        );
+
+        let audio_processor = FFmpegProcessor::new(
+            config.server.ffmpeg_path.clone(),
+            stream_config.sample_rate,
+            stream_config.bitrate,
+            stream_config.channels,
+            stream_config.format.clone(),
+        );
+
+        audio_processor.check_ffmpeg_available()?;
+
+        // Each processor gets a clone of the track receiver
+        let audio_rx = audio_processor.start_streaming_service(track_rx.clone());
+
+        stream_pipelines.push(StreamPipeline {
+            name: name.clone(),
+            receiver: audio_rx,
+            bitrate: stream_config.bitrate,
+        });
+    }
+
+    if stream_pipelines.is_empty() {
+        return Err("No enabled streams found in configuration".into());
+    }
+
+    log::info!("Initialized {} stream(s)", stream_pipelines.len());
+
+    Ok((track_rx, stream_pipelines, current_metadata))
 }
 
 fn start_buffer_writer(
@@ -215,15 +267,14 @@ fn start_buffer_writer(
 
 fn start_server(
     config: &Config,
-    stream_buffer: StreamBuffer,
+    stream_buffers: Vec<(String, StreamBuffer, u32)>,
     current_metadata: Arc<Mutex<TrackMetadata>>,
 ) -> JoinHandle<()> {
     let server = IcecastServer::new(
-        stream_buffer,
+        stream_buffers,
         config.station.station_name.clone(),
         config.station.description.clone(),
         config.station.genre.clone(),
-        config.stream.bitrate,
         current_metadata,
     );
 
@@ -287,11 +338,21 @@ fn log_startup_info(config: &Config) {
 
 fn log_server_urls(config: &Config) {
     log::info!("Funkstrom server started successfully!");
-    log::info!(
-        "Stream URL: http://{}:{}/stream",
-        config.server.bind_address,
-        config.server.port
-    );
+
+    // Log all enabled stream URLs
+    for (name, stream_config) in &config.stream {
+        if stream_config.enabled {
+            log::info!(
+                "  Stream '{}': http://{}:{}/{} ({}kbps)",
+                name,
+                config.server.bind_address,
+                config.server.port,
+                name,
+                stream_config.bitrate
+            );
+        }
+    }
+
     log::info!(
         "Status URL: http://{}:{}/status",
         config.server.bind_address,

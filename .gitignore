@@ -2,3 +2,4 @@
 .idea
 *.log
 /data
+config.toml

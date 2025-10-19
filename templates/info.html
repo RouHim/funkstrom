@@ -298,7 +298,7 @@
         <!-- Audio Player -->
         <div class="audio-player">
             <audio id="radioStream" preload="none">
-                <source src="/stream" type="audio/mpeg">
+                <source src="/{first_stream}" type="audio/mpeg">
                 Your browser does not support the audio element.
             </audio>
 
@@ -322,15 +322,16 @@
             <p><strong>Bitrate:</strong> {bitrate} kbps</p>
             <p><strong>Status:</strong> <span class="status">Online</span></p>
         </div>
-        <a href="/stream" class="stream-link">Listen Now</a>
-        <a href="/status" class="stream-link">Status (JSON)</a>
+        <h3>Available Streams:</h3>
+        {{ for stream in streams }}<a href="/{stream.name}" class="stream-link">{stream.name} - {stream.bitrate} kbps</a>
+        {{ endfor }}<a href="/status" class="stream-link">Status (JSON)</a>
         <a href="/current" class="stream-link">Current Track (JSON)</a>
         <a href="/api-docs" class="stream-link">API Documentation</a>
         <div class="info">
             <h3>How to listen:</h3>
-            <p>Copy this URL into your favorite media player:</p>
-            <code>http://{bind_address}:{port}/stream</code>
-            <p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
+            <p>Copy one of these URLs into your favorite media player:</p>
+            {{ for stream in streams }}<code>{stream.url}</code>
+            {{ endfor }}<p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
         </div>
     </div>
 
