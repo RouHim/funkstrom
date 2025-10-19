@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{station_name} - Funkstrom</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
+        .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+        h1 {{ color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }}
+        .info {{ background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+        .stream-link {{ background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0; }}
+        .stream-link:hover {{ background: #45a049; }}
+        .status {{ font-weight: bold; color: #4CAF50; }}
+        .now-playing {{ background: #e8f5e9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50; }}
+        .now-playing h2 {{ margin-top: 0; color: #2e7d32; }}
+        .track-info {{ font-size: 1.1em; margin: 10px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{station_name}</h1>
+        <div class="now-playing">
+            <h2>Now Playing</h2>
+            <div class="track-info">{current_track}</div>
+            <div style="color: #666; margin-top: 5px;">Album: {album}</div>
+        </div>
+        <div class="info">
+            <p><strong>Description:</strong> {station_description}</p>
+            <p><strong>Genre:</strong> {station_genre}</p>
+            <p><strong>Bitrate:</strong> {bitrate} kbps</p>
+            <p><strong>Status:</strong> <span class="status">Online</span></p>
+        </div>
+        <a href="/stream" class="stream-link">🎵 Listen Now</a>
+        <a href="/status" class="stream-link">📊 Status (JSON)</a>
+        <a href="/current" class="stream-link">🎵 Current Track (JSON)</a>
+        <a href="/api-docs" class="stream-link">📖 API Documentation</a>
+        <div class="info">
+            <h3>How to listen:</h3>
+            <p>Copy this URL into your favorite media player:</p>
+            <code>http://{bind_address}:{port}/stream</code>
+            <p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
+        </div>
+    </div>
+</body>
+</html>

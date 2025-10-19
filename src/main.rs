@@ -9,7 +9,6 @@ mod library_scanner;
 mod m3u_parser;
 mod schedule_engine;
 mod server_icecast;
-mod server_metadata;
 mod server_swagger;
 
 use audio_buffer::StreamBuffer;
@@ -71,7 +70,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
 
 fn initialize_library(
     config: &Config,
@@ -156,12 +154,8 @@ fn setup_audio_pipeline(
     schedule_rx: Option<Receiver<PlaylistCommand>>,
 ) -> Result<AudioPipeline, Box<dyn std::error::Error>> {
     let music_dir = PathBuf::from(&config.library.music_directory);
-    let audio_reader = AudioReader::new(
-        music_dir,
-        config.library.shuffle,
-        config.library.repeat,
-        db,
-    )?;
+    let audio_reader =
+        AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
 
     let audio_processor = FFmpegProcessor::new(
         config.server.ffmpeg_path.clone(),
@@ -227,9 +221,10 @@ fn start_server(
         current_metadata,
     );
 
+    let bind_address = config.server.bind_address.clone();
     let port = config.server.port;
     tokio::spawn(async move {
-        server.start_server(port).await;
+        server.start_server(&bind_address, port).await;
     })
 }
 

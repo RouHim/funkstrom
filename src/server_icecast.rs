@@ -15,6 +15,8 @@ pub struct IcecastServer {
     station_genre: String,
     bitrate: u32,
     current_metadata: Arc<Mutex<TrackMetadata>>,
+    bind_address: Arc<Mutex<String>>,
+    port: Arc<Mutex<u16>>,
 }
 
 impl IcecastServer {
@@ -33,10 +35,16 @@ impl IcecastServer {
             station_genre,
             bitrate,
             current_metadata,
+            bind_address: Arc::new(Mutex::new(String::new())),
+            port: Arc::new(Mutex::new(0)),
         }
     }
 
-    pub async fn start_server(&self, port: u16) {
+    pub async fn start_server(&self, bind_address: &str, port: u16) {
+        // Store bind_address and port for use in info page
+        *self.bind_address.lock().unwrap() = bind_address.to_string();
+        *self.port.lock().unwrap() = port;
+
         let server = Arc::new(self.clone());
 
         let stream_route = warp::path("stream")
@@ -85,11 +93,14 @@ impl IcecastServer {
             .or(openapi_spec_route)
             .or(info_route);
 
-        log::info!("Starting Icecast server on port {}", port);
-        log::info!("Stream URL: http://127.0.0.1:{}/stream", port);
-        log::info!("API Docs: http://127.0.0.1:{}/api-docs", port);
+        log::info!("Starting Icecast server on {}:{}", bind_address, port);
+        log::info!("Stream URL: http://{}:{}/stream", bind_address, port);
+        log::info!("API Docs: http://{}:{}/api-docs", bind_address, port);
 
-        warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+        let addr: std::net::SocketAddr = format!("{}:{}", bind_address, port)
+            .parse()
+            .expect("Invalid bind address");
+        warp::serve(routes).run(addr).await;
     }
 
     async fn handle_stream_request(
@@ -136,6 +147,8 @@ impl IcecastServer {
 
         let stream = UnboundedReceiverStream::new(rx);
 
+        let server_version = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+
         let response = warp::http::Response::builder()
             .header("Content-Type", "audio/mpeg")
             .header("Cache-Control", "no-cache, no-store")
@@ -150,7 +163,7 @@ impl IcecastServer {
             .header("icy-genre", &self.station_genre)
             .header("icy-br", self.bitrate.to_string())
             .header("icy-metaint", "16000")
-            .header("Server", "Funkstrom/1.0")
+            .header("Server", &server_version)
             .body(hyper::Body::wrap_stream(stream))
             .unwrap();
 
@@ -204,59 +217,20 @@ impl IcecastServer {
         let current_track = metadata.to_icy_metadata();
         let album = &metadata.album;
 
-        let info = format!(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>{} - Funkstrom</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
-        .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        h1 {{ color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }}
-        .info {{ background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-        .stream-link {{ background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0; }}
-        .stream-link:hover {{ background: #45a049; }}
-        .status {{ font-weight: bold; color: #4CAF50; }}
-        .now-playing {{ background: #e8f5e9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50; }}
-        .now-playing h2 {{ margin-top: 0; color: #2e7d32; }}
-        .track-info {{ font-size: 1.1em; margin: 10px 0; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>{}</h1>
-        <div class="now-playing">
-            <h2>Now Playing</h2>
-            <div class="track-info">{}</div>
-            <div style="color: #666; margin-top: 5px;">Album: {}</div>
-        </div>
-        <div class="info">
-            <p><strong>Description:</strong> {}</p>
-            <p><strong>Genre:</strong> {}</p>
-            <p><strong>Bitrate:</strong> {} kbps</p>
-            <p><strong>Status:</strong> <span class="status">Online</span></p>
-        </div>
-        <a href="/stream" class="stream-link">🎵 Listen Now</a>
-        <a href="/status" class="stream-link">📊 Status (JSON)</a>
-        <a href="/current" class="stream-link">🎵 Current Track (JSON)</a>
-        <a href="/api-docs" class="stream-link">📖 API Documentation</a>
-        <div class="info">
-            <h3>How to listen:</h3>
-            <p>Copy this URL into your favorite media player:</p>
-            <code>http://127.0.0.1:8000/stream</code>
-            <p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
-        </div>
-    </div>
-</body>
-</html>"#,
-            self.station_name,
-            self.station_name,
-            current_track,
-            album,
-            self.station_description,
-            self.station_genre,
-            self.bitrate
-        );
+        let bind_address = self.bind_address.lock().unwrap().clone();
+        let port = *self.port.lock().unwrap();
+
+        const TEMPLATE: &str = include_str!("../templates/info.html");
+
+        let info = TEMPLATE
+            .replace("{station_name}", &self.station_name)
+            .replace("{current_track}", &current_track)
+            .replace("{album}", album)
+            .replace("{station_description}", &self.station_description)
+            .replace("{station_genre}", &self.station_genre)
+            .replace("{bitrate}", &self.bitrate.to_string())
+            .replace("{bind_address}", &bind_address)
+            .replace("{port}", &port.to_string());
 
         Ok(warp::reply::with_header(
             info,
