@@ -1,10 +1,10 @@
 use crate::audio_buffer::StreamBuffer;
 use crate::audio_metadata::TrackMetadata;
 use crate::server_swagger;
+use minijinja::Environment;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tinytemplate::TinyTemplate;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::{http::HeaderMap, Filter, Reply};
@@ -348,13 +348,18 @@ impl IcecastServer {
 
         const TEMPLATE_STR: &str = include_str!("../templates/info.html");
 
-        let mut tt = TinyTemplate::new();
-        tt.add_template("info", TEMPLATE_STR).map_err(|e| {
+        let mut env = Environment::new();
+        env.add_template("info", TEMPLATE_STR).map_err(|e| {
             log::error!("Template error: {}", e);
             warp::reject::reject()
         })?;
 
-        let rendered = tt.render("info", &context).map_err(|e| {
+        let tmpl = env.get_template("info").map_err(|e| {
+            log::error!("Template get error: {}", e);
+            warp::reject::reject()
+        })?;
+
+        let rendered = tmpl.render(&context).map_err(|e| {
             log::error!("Render error: {}", e);
             warp::reject::reject()
         })?;

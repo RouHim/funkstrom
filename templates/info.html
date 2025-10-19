@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{station_name} - Funkstrom</title>
+    <title>{{ station_name }} - Funkstrom</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -288,17 +288,17 @@
 </head>
 <body>
     <div class="container">
-        <h1>{station_name}</h1>
+        <h1>{{ station_name }}</h1>
         <div class="now-playing">
             <h2>Now Playing</h2>
-            <div class="track-info">{current_track}</div>
-            <div style="color: rgba(207, 250, 254, 0.7); margin-top: 5px;">Album: {album}</div>
+            <div class="track-info">{{ current_track }}</div>
+            <div style="color: rgba(207, 250, 254, 0.7); margin-top: 5px;">Album: {{ album }}</div>
         </div>
 
         <!-- Audio Player -->
         <div class="audio-player">
             <audio id="radioStream" preload="none">
-                <source src="/{first_stream}" type="audio/mpeg">
+                <source src="/{{ first_stream }}" type="audio/mpeg">
                 Your browser does not support the audio element.
             </audio>
 
@@ -317,21 +317,21 @@
         </div>
 
         <div class="info">
-            <p><strong>Description:</strong> {station_description}</p>
-            <p><strong>Genre:</strong> {station_genre}</p>
-            <p><strong>Bitrate:</strong> {bitrate} kbps</p>
+            <p><strong>Description:</strong> {{ station_description }}</p>
+            <p><strong>Genre:</strong> {{ station_genre }}</p>
+            <p><strong>Bitrate:</strong> {{ bitrate }} kbps</p>
             <p><strong>Status:</strong> <span class="status">Online</span></p>
         </div>
         <h3>Available Streams:</h3>
-        {{ for stream in streams }}<a href="/{stream.name}" class="stream-link">{stream.name} - {stream.bitrate} kbps</a>
-        {{ endfor }}<a href="/status" class="stream-link">Status (JSON)</a>
+        {% for stream in streams %}<a href="/{{ stream.name }}" class="stream-link">{{ stream.name }} - {{ stream.bitrate }} kbps</a>
+        {% endfor %}<a href="/status" class="stream-link">Status (JSON)</a>
         <a href="/current" class="stream-link">Current Track (JSON)</a>
         <a href="/api-docs" class="stream-link">API Documentation</a>
         <div class="info">
             <h3>How to listen:</h3>
             <p>Copy one of these URLs into your favorite media player:</p>
-            {{ for stream in streams }}<code>{stream.url}</code>
-            {{ endfor }}<p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
+            {% for stream in streams %}<code>{{ stream.url }}</code>
+            {% endfor %}<p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
         </div>
     </div>
 
