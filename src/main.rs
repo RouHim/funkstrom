@@ -271,7 +271,7 @@ fn start_nightly_rescan(scanner: LibraryScanner) -> JoinHandle<()> {
 
 fn log_startup_info(config: &Config) {
     log::info!(
-        "Starting iRadio server on {}:{}",
+        "Starting Funkstrom server on {}:{}",
         config.server.bind_address,
         config.server.port
     );
@@ -280,7 +280,7 @@ fn log_startup_info(config: &Config) {
 }
 
 fn log_server_urls(config: &Config) {
-    log::info!("iRadio server started successfully!");
+    log::info!("Funkstrom server started successfully!");
     log::info!(
         "Stream URL: http://{}:{}/stream",
         config.server.bind_address,
