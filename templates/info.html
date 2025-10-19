@@ -2,17 +2,288 @@
 <html>
 <head>
     <title>{station_name} - Funkstrom</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }}
-        .container {{ max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-        h1 {{ color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }}
-        .info {{ background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-        .stream-link {{ background: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0; }}
-        .stream-link:hover {{ background: #45a049; }}
-        .status {{ font-weight: bold; color: #4CAF50; }}
-        .now-playing {{ background: #e8f5e9; padding: 20px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4CAF50; }}
-        .now-playing h2 {{ margin-top: 0; color: #2e7d32; }}
-        .track-info {{ font-size: 1.1em; margin: 10px 0; }}
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #0c1821;
+            color: #cffafe;
+            min-height: 100vh;
+            padding: 20px 15px;
+        }
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            background: linear-gradient(135deg, rgba(8, 145, 178, 0.1) 0%, rgba(30, 64, 175, 0.1) 100%);
+            padding: 25px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(103, 232, 249, 0.2);
+        }
+        h1 {
+            background: linear-gradient(135deg, #0891b2 0%, #1e40af 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 2em;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #14b8a6;
+            word-wrap: break-word;
+        }
+        h2 {
+            color: #67e8f9;
+            font-size: 1.3em;
+            margin-bottom: 12px;
+        }
+        h3 {
+            color: #67e8f9;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        .info {
+            background: rgba(12, 24, 33, 0.5);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border: 1px solid rgba(20, 184, 166, 0.3);
+        }
+        .info p {
+            margin: 10px 0;
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+        .stream-link {
+            background: linear-gradient(135deg, #0891b2 0%, #1e40af 100%);
+            color: #cffafe;
+            padding: 10px 18px;
+            text-decoration: none;
+            border-radius: 6px;
+            display: inline-block;
+            margin: 6px 6px 6px 0;
+            transition: all 0.3s ease;
+            border: 1px solid rgba(103, 232, 249, 0.3);
+            font-size: 0.95em;
+        }
+        .stream-link:hover {
+            background: linear-gradient(135deg, #14b8a6 0%, #0891b2 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(20, 184, 166, 0.4);
+        }
+        .status {
+            font-weight: bold;
+            color: #14b8a6;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .now-playing {
+            background: rgba(20, 184, 166, 0.1);
+            padding: 18px 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #14b8a6;
+        }
+        .now-playing h2 {
+            margin-top: 0;
+            color: #14b8a6;
+        }
+        .track-info {
+            font-size: 1.1em;
+            margin: 12px 0;
+            color: #67e8f9;
+            font-weight: 500;
+            word-wrap: break-word;
+        }
+        code {
+            background: rgba(8, 145, 178, 0.2);
+            color: #67e8f9;
+            padding: 8px 10px;
+            border-radius: 4px;
+            display: block;
+            margin: 12px 0;
+            font-family: 'Courier New', monospace;
+            border: 1px solid rgba(103, 232, 249, 0.3);
+            font-size: 0.85em;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        small {
+            color: rgba(207, 250, 254, 0.7);
+        }
+        strong {
+            color: #67e8f9;
+        }
+
+        /* Audio Player Styles */
+        .audio-player {
+            background: rgba(12, 24, 33, 0.5);
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid rgba(20, 184, 166, 0.3);
+        }
+        .player-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .play-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 4px;
+            background: #0891b2;
+            border: 1px solid rgba(103, 232, 249, 0.3);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+        .play-button:hover {
+            background: #14b8a6;
+        }
+        .play-button:active {
+            transform: scale(0.95);
+        }
+        .play-icon {
+            width: 0;
+            height: 0;
+            border-style: solid;
+            border-width: 8px 0 8px 12px;
+            border-color: transparent transparent transparent #cffafe;
+            margin-left: 2px;
+        }
+        .pause-icon {
+            display: none;
+            gap: 4px;
+            align-items: center;
+            justify-content: center;
+        }
+        .pause-icon::before,
+        .pause-icon::after {
+            content: '';
+            width: 3px;
+            height: 14px;
+            background: #cffafe;
+            border-radius: 1px;
+        }
+        .playing .play-icon {
+            display: none;
+        }
+        .playing .pause-icon {
+            display: flex;
+        }
+        .volume-control {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .volume-label {
+            color: rgba(207, 250, 254, 0.7);
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .volume-slider {
+            flex: 1;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(103, 232, 249, 0.2);
+            border-radius: 2px;
+            outline: none;
+        }
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            background: #0891b2;
+            cursor: pointer;
+        }
+        .volume-slider::-webkit-slider-thumb:hover {
+            background: #14b8a6;
+        }
+        .volume-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            background: #0891b2;
+            border: none;
+            cursor: pointer;
+        }
+        .volume-slider::-moz-range-thumb:hover {
+            background: #14b8a6;
+        }
+
+        /* Mobile optimizations */
+        @media screen and (max-width: 600px) {
+            body {
+                padding: 15px 10px;
+            }
+            .container {
+                padding: 20px 15px;
+            }
+            h1 {
+                font-size: 1.6em;
+                margin-bottom: 15px;
+            }
+            h2 {
+                font-size: 1.2em;
+            }
+            h3 {
+                font-size: 1em;
+            }
+            .stream-link {
+                display: block;
+                width: 100%;
+                text-align: center;
+                margin: 8px 0;
+                padding: 12px;
+            }
+            .now-playing {
+                padding: 15px 12px;
+                margin: 15px 0;
+            }
+            .track-info {
+                font-size: 1em;
+            }
+            .info {
+                padding: 12px;
+            }
+            code {
+                font-size: 0.75em;
+                padding: 6px 8px;
+            }
+            .audio-player {
+                padding: 15px 12px;
+            }
+            .player-controls {
+                gap: 10px;
+            }
+            .play-button {
+                width: 35px;
+                height: 35px;
+            }
+            .play-icon {
+                border-width: 6px 0 6px 10px;
+            }
+            .pause-icon {
+                gap: 3px;
+            }
+            .pause-icon::before,
+            .pause-icon::after {
+                width: 2px;
+                height: 10px;
+            }
+            .volume-label {
+                font-size: 0.75em;
+            }
+        }
     </style>
 </head>
 <body>
@@ -21,18 +292,40 @@
         <div class="now-playing">
             <h2>Now Playing</h2>
             <div class="track-info">{current_track}</div>
-            <div style="color: #666; margin-top: 5px;">Album: {album}</div>
+            <div style="color: rgba(207, 250, 254, 0.7); margin-top: 5px;">Album: {album}</div>
         </div>
+
+        <!-- Audio Player -->
+        <div class="audio-player">
+            <audio id="radioStream" preload="none">
+                <source src="/stream" type="audio/mpeg">
+                Your browser does not support the audio element.
+            </audio>
+
+            <div class="player-controls">
+                <button class="play-button" id="playButton" aria-label="Play/Pause">
+                    <div class="play-icon"></div>
+                    <div class="pause-icon"></div>
+                </button>
+
+                <div class="volume-control">
+                    <span class="volume-label">Volume:</span>
+                    <input type="range" class="volume-slider" id="volumeSlider"
+                           min="0" max="100" value="70" aria-label="Volume">
+                </div>
+            </div>
+        </div>
+
         <div class="info">
             <p><strong>Description:</strong> {station_description}</p>
             <p><strong>Genre:</strong> {station_genre}</p>
             <p><strong>Bitrate:</strong> {bitrate} kbps</p>
             <p><strong>Status:</strong> <span class="status">Online</span></p>
         </div>
-        <a href="/stream" class="stream-link">🎵 Listen Now</a>
-        <a href="/status" class="stream-link">📊 Status (JSON)</a>
-        <a href="/current" class="stream-link">🎵 Current Track (JSON)</a>
-        <a href="/api-docs" class="stream-link">📖 API Documentation</a>
+        <a href="/stream" class="stream-link">Listen Now</a>
+        <a href="/status" class="stream-link">Status (JSON)</a>
+        <a href="/current" class="stream-link">Current Track (JSON)</a>
+        <a href="/api-docs" class="stream-link">API Documentation</a>
         <div class="info">
             <h3>How to listen:</h3>
             <p>Copy this URL into your favorite media player:</p>
@@ -40,5 +333,74 @@
             <p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
         </div>
     </div>
+
+    <script>
+        // Audio Player Controller
+        (function() {
+            const audio = document.getElementById('radioStream');
+            const playButton = document.getElementById('playButton');
+            const volumeSlider = document.getElementById('volumeSlider');
+
+            let isPlaying = false;
+
+            // Load saved volume from localStorage
+            const savedVolume = localStorage.getItem('radioVolume');
+            if (savedVolume !== null) {
+                volumeSlider.value = savedVolume;
+                audio.volume = savedVolume / 100;
+            } else {
+                audio.volume = 0.7; // Default 70%
+            }
+
+            // Play/Pause functionality
+            playButton.addEventListener('click', function() {
+                if (isPlaying) {
+                    pause();
+                } else {
+                    play();
+                }
+            });
+
+            function play() {
+                audio.play().then(() => {
+                    isPlaying = true;
+                    playButton.classList.add('playing');
+                }).catch(error => {
+                    console.error('Playback error:', error);
+                    isPlaying = false;
+                    playButton.classList.remove('playing');
+                });
+            }
+
+            function pause() {
+                audio.pause();
+                audio.currentTime = 0; // Reset for streams
+                isPlaying = false;
+                playButton.classList.remove('playing');
+            }
+
+            // Volume control
+            volumeSlider.addEventListener('input', function() {
+                const volume = this.value / 100;
+                audio.volume = volume;
+                localStorage.setItem('radioVolume', this.value);
+            });
+
+            // Audio event listeners
+            audio.addEventListener('error', function(e) {
+                console.error('Stream error:', e);
+                isPlaying = false;
+                playButton.classList.remove('playing');
+            });
+
+            // Keyboard support
+            document.addEventListener('keydown', function(e) {
+                if (e.code === 'Space' && e.target === document.body) {
+                    e.preventDefault();
+                    playButton.click();
+                }
+            });
+        })();
+    </script>
 </body>
 </html>
