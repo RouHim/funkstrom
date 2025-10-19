@@ -10,15 +10,37 @@ pub struct FFmpegProcessor {
     sample_rate: u32,
     bitrate: u32,
     channels: u8,
+    format: String,
 }
 
 impl FFmpegProcessor {
-    pub fn new(ffmpeg_path: Option<String>, sample_rate: u32, bitrate: u32, channels: u8) -> Self {
+    pub fn new(
+        ffmpeg_path: Option<String>,
+        sample_rate: u32,
+        bitrate: u32,
+        channels: u8,
+        format: String,
+    ) -> Self {
         Self {
             ffmpeg_path: ffmpeg_path.unwrap_or_else(|| "ffmpeg".to_string()),
             sample_rate,
             bitrate,
             channels,
+            format,
+        }
+    }
+
+    fn get_codec_for_format(&self, format: &str) -> &str {
+        match format {
+            "mp3" => "libmp3lame",
+            "opus" => "libopus",
+            "aac" => "aac",
+            "vorbis" | "ogg" => "libvorbis",
+            "flac" => "flac",
+            _ => {
+                warn!("Unknown format '{}', defaulting to libmp3lame", format);
+                "libmp3lame"
+            }
         }
     }
 
@@ -52,14 +74,16 @@ impl FFmpegProcessor {
             return Err(format!("Input file does not exist: {:?}", input_path).into());
         }
 
+        let codec = self.get_codec_for_format(&self.format);
+
         let mut cmd = Command::new(&self.ffmpeg_path);
         cmd.args([
             "-i",
             input_path.to_str().unwrap(),
             "-f",
-            "mp3",
+            &self.format,
             "-acodec",
-            "libmp3lame",
+            codec,
             "-ab",
             &format!("{}k", self.bitrate),
             "-ar",
@@ -197,4 +221,51 @@ impl AudioProcess {
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
     pub data: Bytes,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        assert_eq!(processor.get_codec_for_format("mp3"), "libmp3lame");
+    }
+
+    #[test]
+    fn given_opus_format_when_getting_codec_then_returns_libopus() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "opus".to_string());
+        assert_eq!(processor.get_codec_for_format("opus"), "libopus");
+    }
+
+    #[test]
+    fn given_aac_format_when_getting_codec_then_returns_aac() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
+        assert_eq!(processor.get_codec_for_format("aac"), "aac");
+    }
+
+    #[test]
+    fn given_vorbis_format_when_getting_codec_then_returns_libvorbis() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "vorbis".to_string());
+        assert_eq!(processor.get_codec_for_format("vorbis"), "libvorbis");
+    }
+
+    #[test]
+    fn given_ogg_format_when_getting_codec_then_returns_libvorbis() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
+        assert_eq!(processor.get_codec_for_format("ogg"), "libvorbis");
+    }
+
+    #[test]
+    fn given_flac_format_when_getting_codec_then_returns_flac() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
+        assert_eq!(processor.get_codec_for_format("flac"), "flac");
+    }
+
+    #[test]
+    fn given_unknown_format_when_getting_codec_then_returns_default_libmp3lame() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
+        assert_eq!(processor.get_codec_for_format("unknown"), "libmp3lame");
+    }
 }

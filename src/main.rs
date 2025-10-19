@@ -168,6 +168,7 @@ fn setup_audio_pipeline(
         config.stream.sample_rate,
         config.stream.bitrate,
         config.stream.channels,
+        config.stream.format.clone(),
     );
 
     audio_processor.check_ffmpeg_available()?;
