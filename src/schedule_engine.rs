@@ -1,4 +1,4 @@
-use crate::config::ScheduleProgram;
+use crate::config::{ProgramType, ScheduleProgram};
 use crate::m3u_parser::M3uParser;
 use chrono::{DateTime, Duration, Local};
 use cron::Schedule;
@@ -12,6 +12,11 @@ pub enum PlaylistCommand {
     SwitchToPlaylist {
         name: String,
         tracks: Vec<PathBuf>,
+        duration: Duration,
+    },
+    SwitchToLiveset {
+        name: String,
+        genres: Vec<String>,
         duration: Duration,
     },
     ReturnToLibrary,
@@ -28,7 +33,9 @@ struct ValidatedProgram {
     name: String,
     schedule: Schedule,
     duration: Duration,
-    playlist_path: PathBuf,
+    program_type: ProgramType,
+    playlist_path: Option<PathBuf>,
+    genres: Option<Vec<String>>,
 }
 
 impl ScheduleEngine {
@@ -66,19 +73,49 @@ impl ScheduleEngine {
     fn validate_and_convert(
         program: &ScheduleProgram,
     ) -> Result<ValidatedProgram, Box<dyn std::error::Error>> {
+        // Validate program-specific fields
+        program
+            .validate()
+            .map_err(|e| format!("Program '{}': {}", program.name, e))?;
+
         let schedule = Schedule::from_str(&program.cron)
             .map_err(|e| format!("Invalid cron expression '{}': {}", program.cron, e))?;
 
         let duration = Self::parse_duration(&program.duration)?;
 
-        let playlist_path = PathBuf::from(&program.playlist);
-        M3uParser::validate_playlist(&playlist_path)?;
+        let program_type = program.get_type();
+
+        let playlist_path = match program_type {
+            ProgramType::Playlist => {
+                let path = PathBuf::from(
+                    program
+                        .playlist
+                        .as_ref()
+                        .expect("Playlist path should exist after validation"),
+                );
+                M3uParser::validate_playlist(&path)?;
+                Some(path)
+            }
+            ProgramType::Liveset => None,
+        };
+
+        let genres = match program_type {
+            ProgramType::Liveset => Some(
+                program
+                    .genres
+                    .clone()
+                    .expect("Genres should exist after validation"),
+            ),
+            ProgramType::Playlist => None,
+        };
 
         Ok(ValidatedProgram {
             name: program.name.clone(),
             schedule,
             duration,
+            program_type,
             playlist_path,
+            genres,
         })
     }
 
@@ -157,35 +194,76 @@ impl ScheduleEngine {
         now: &DateTime<Local>,
         current_program: &mut Option<(String, DateTime<Local>)>,
     ) {
-        match M3uParser::parse(&program.playlist_path) {
-            Ok(tracks) => {
-                let end_time = *now + program.duration;
+        let end_time = *now + program.duration;
+
+        match program.program_type {
+            ProgramType::Playlist => {
+                let playlist_path = program
+                    .playlist_path
+                    .as_ref()
+                    .expect("Playlist path should exist for playlist programs");
+
+                match M3uParser::parse(playlist_path) {
+                    Ok(tracks) => {
+                        info!(
+                            "Starting playlist program '{}' with {} tracks (duration: {})",
+                            program.name,
+                            tracks.len(),
+                            Self::format_duration(&program.duration)
+                        );
+
+                        if self
+                            .command_tx
+                            .send(PlaylistCommand::SwitchToPlaylist {
+                                name: program.name.clone(),
+                                tracks,
+                                duration: program.duration,
+                            })
+                            .is_ok()
+                        {
+                            *current_program = Some((program.name.clone(), end_time));
+                        } else {
+                            error!("Failed to send playlist switch command");
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to load playlist for program '{}': {}",
+                            program.name, e
+                        );
+                    }
+                }
+            }
+            ProgramType::Liveset => {
+                let genres = program
+                    .genres
+                    .as_ref()
+                    .expect("Genres should exist for liveset programs");
+
                 info!(
-                    "Starting program '{}' with {} tracks (duration: {})",
+                    "Starting liveset program '{}' (genres: {:?}, duration: {})",
                     program.name,
-                    tracks.len(),
+                    if genres.is_empty() {
+                        "all".to_string()
+                    } else {
+                        genres.join(", ")
+                    },
                     Self::format_duration(&program.duration)
                 );
 
                 if self
                     .command_tx
-                    .send(PlaylistCommand::SwitchToPlaylist {
+                    .send(PlaylistCommand::SwitchToLiveset {
                         name: program.name.clone(),
-                        tracks,
+                        genres: genres.clone(),
                         duration: program.duration,
                     })
                     .is_ok()
                 {
                     *current_program = Some((program.name.clone(), end_time));
                 } else {
-                    error!("Failed to send playlist switch command");
+                    error!("Failed to send liveset switch command");
                 }
-            }
-            Err(e) => {
-                error!(
-                    "Failed to load playlist for program '{}': {}",
-                    program.name, e
-                );
             }
         }
     }
@@ -286,7 +364,9 @@ mod tests {
             active: true,
             cron: "invalid cron".to_string(),
             duration: "30m".to_string(),
-            playlist: "test.m3u".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
         };
 
         let result = ScheduleEngine::validate_and_convert(&program);
@@ -302,7 +382,9 @@ mod tests {
             active: true,
             cron: "0 0 * * * *".to_string(),
             duration: "invalid".to_string(),
-            playlist: "test.m3u".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
         };
 
         let result = ScheduleEngine::validate_and_convert(&program);

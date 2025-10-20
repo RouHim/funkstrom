@@ -29,6 +29,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.31"
 minijinja = "2.12"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 tempfile = "3.8"

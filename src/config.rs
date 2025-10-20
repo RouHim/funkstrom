@@ -98,7 +98,49 @@ pub struct ScheduleProgram {
     pub active: bool,
     pub cron: String,
     pub duration: String,
-    pub playlist: String,
+    #[serde(rename = "type")]
+    pub program_type: Option<String>,
+    pub playlist: Option<String>,
+    pub genres: Option<Vec<String>>,
+}
+
+impl ScheduleProgram {
+    /// Returns the program type, defaulting to "playlist" if not specified
+    pub fn get_type(&self) -> ProgramType {
+        match self.program_type.as_deref() {
+            Some("liveset") => ProgramType::Liveset,
+            _ => {
+                // Default to playlist if type is not specified or is "playlist"
+                ProgramType::Playlist
+            }
+        }
+    }
+
+    /// Validates the program configuration
+    pub fn validate(&self) -> Result<(), String> {
+        match self.get_type() {
+            ProgramType::Playlist => {
+                if self.playlist.is_none() {
+                    return Err("Playlist programs must specify a 'playlist' field".to_string());
+                }
+            }
+            ProgramType::Liveset => {
+                if self.genres.is_none() {
+                    return Err(
+                        "Liveset programs must specify a 'genres' field (use empty array [] for all genres)"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProgramType {
+    Playlist,
+    Liveset,
 }
 
 impl Config {
@@ -439,5 +481,118 @@ enabled = true
                 name
             );
         }
+    }
+
+    #[test]
+    fn test_playlist_program_validation_success() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
+        };
+
+        assert!(program.validate().is_ok());
+    }
+
+    #[test]
+    fn test_playlist_program_validation_missing_playlist() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: None,
+            genres: None,
+        };
+
+        let result = program.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("must specify a 'playlist' field"));
+    }
+
+    #[test]
+    fn test_liveset_program_validation_success() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("liveset".to_string()),
+            playlist: None,
+            genres: Some(vec!["techno".to_string(), "house".to_string()]),
+        };
+
+        assert!(program.validate().is_ok());
+    }
+
+    #[test]
+    fn test_liveset_program_validation_empty_genres() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("liveset".to_string()),
+            playlist: None,
+            genres: Some(vec![]),
+        };
+
+        assert!(program.validate().is_ok());
+    }
+
+    #[test]
+    fn test_liveset_program_validation_missing_genres() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("liveset".to_string()),
+            playlist: None,
+            genres: None,
+        };
+
+        let result = program.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("must specify a 'genres' field"));
+    }
+
+    #[test]
+    fn test_program_type_defaults_to_playlist() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: None,
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
+        };
+
+        assert_eq!(program.get_type(), ProgramType::Playlist);
+    }
+
+    #[test]
+    fn test_program_type_liveset() {
+        let program = ScheduleProgram {
+            name: "test".to_string(),
+            active: true,
+            cron: "0 0 * * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("liveset".to_string()),
+            playlist: None,
+            genres: Some(vec![]),
+        };
+
+        assert_eq!(program.get_type(), ProgramType::Liveset);
     }
 }

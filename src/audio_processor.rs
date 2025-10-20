@@ -68,10 +68,26 @@ impl FFmpegProcessor {
         &self,
         input_path: &Path,
     ) -> Result<AudioProcess, Box<dyn std::error::Error>> {
-        info!("Starting FFmpeg conversion for: {:?}", input_path);
+        let input_str = input_path.to_str().unwrap();
+        self.start_conversion(input_str)
+    }
 
-        if !input_path.exists() {
-            return Err(format!("Input file does not exist: {:?}", input_path).into());
+    pub fn start_conversion_from_url(
+        &self,
+        url: &str,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error>> {
+        self.start_conversion(url)
+    }
+
+    fn start_conversion(&self, input: &str) -> Result<AudioProcess, Box<dyn std::error::Error>> {
+        info!("Starting FFmpeg conversion for: {}", input);
+
+        // Only check file existence for local files (not URLs)
+        if !input.starts_with("http://") && !input.starts_with("https://") {
+            let path = Path::new(input);
+            if !path.exists() {
+                return Err(format!("Input file does not exist: {}", input).into());
+            }
         }
 
         let codec = self.get_codec_for_format(&self.format);
@@ -79,7 +95,7 @@ impl FFmpegProcessor {
         let mut cmd = Command::new(&self.ffmpeg_path);
         cmd.args([
             "-i",
-            input_path.to_str().unwrap(),
+            input,
             "-f",
             &self.format,
             "-acodec",
@@ -121,7 +137,19 @@ impl FFmpegProcessor {
                     // Try to get next track
                     if let Ok(track) = track_rx.try_recv() {
                         current_track = Some(track.clone());
-                        match self.start_conversion_process(&track) {
+
+                        // Check if track is a URL or local file
+                        let track_str = track.to_str().unwrap_or("");
+                        let result = if track_str.starts_with("http://")
+                            || track_str.starts_with("https://")
+                        {
+                            info!("Starting stream from URL: {}", track_str);
+                            self.start_conversion_from_url(track_str)
+                        } else {
+                            self.start_conversion_process(&track)
+                        };
+
+                        match result {
                             Ok(process) => {
                                 info!("Started processing track: {:?}", track);
                                 current_process = Some(process);

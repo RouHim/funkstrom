@@ -1,4 +1,5 @@
 use crate::audio_metadata::TrackMetadata;
+use crate::hearthis_client::HearthisClient;
 use crate::library_db::LibraryDatabase;
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
@@ -195,6 +196,64 @@ impl AudioReader {
                             duration,
                         }) => {
                             self.switch_to_scheduled_playlist(name, tracks, duration);
+                        }
+                        Ok(PlaylistCommand::SwitchToLiveset {
+                            name,
+                            genres,
+                            duration,
+                        }) => {
+                            // Fetch liveset from hearthis.at API
+                            info!(
+                                "Fetching liveset for program '{}' (genres: {:?})",
+                                name, genres
+                            );
+
+                            let client = HearthisClient::new();
+                            match client {
+                                Ok(client) => {
+                                    // Spawn a task to fetch the liveset
+                                    let name_clone = name.clone();
+                                    let genres_clone = genres.clone();
+
+                                    match tokio::runtime::Handle::try_current() {
+                                        Ok(handle) => {
+                                            let future = async move {
+                                                client.get_random_liveset(&genres_clone).await
+                                            };
+
+                                            match handle.block_on(future) {
+                                                Ok(track) => {
+                                                    info!(
+                                                        "Fetched liveset: '{}' by {} ({})",
+                                                        track.title,
+                                                        track.user.username,
+                                                        track.genre
+                                                    );
+
+                                                    // Use PathBuf to store the stream URL
+                                                    // FFmpeg can handle HTTP URLs directly
+                                                    let stream_path =
+                                                        PathBuf::from(track.stream_url);
+                                                    self.switch_to_scheduled_playlist(
+                                                        name_clone,
+                                                        vec![stream_path],
+                                                        duration,
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    error!("Failed to fetch liveset: {}", e);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("No tokio runtime available: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to create hearthis client: {}", e);
+                                }
+                            }
                         }
                         Ok(PlaylistCommand::ReturnToLibrary) => {
                             self.return_to_library();
