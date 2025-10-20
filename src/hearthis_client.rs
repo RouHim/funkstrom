@@ -28,7 +28,7 @@ pub struct HearthisClient {
 }
 
 impl HearthisClient {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()?;
@@ -41,7 +41,7 @@ impl HearthisClient {
     pub async fn get_random_liveset(
         &self,
         genres: &[String],
-    ) -> Result<HearthisTrack, Box<dyn std::error::Error>> {
+    ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         if genres.is_empty() {
             // Fetch from general feed
             self.fetch_random_from_feed().await
@@ -51,7 +51,7 @@ impl HearthisClient {
         }
     }
 
-    async fn fetch_random_from_feed(&self) -> Result<HearthisTrack, Box<dyn std::error::Error>> {
+    async fn fetch_random_from_feed(&self) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/feed/?page=1&count=20", HEARTHIS_API_BASE);
 
         debug!("Fetching tracks from feed: {}", url);
@@ -81,7 +81,7 @@ impl HearthisClient {
     async fn fetch_random_from_genres(
         &self,
         genres: &[String],
-    ) -> Result<HearthisTrack, Box<dyn std::error::Error>> {
+    ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         // Try each genre in the list
         for genre in genres {
             match self.fetch_from_genre(genre).await {
@@ -110,7 +110,7 @@ impl HearthisClient {
     async fn fetch_from_genre(
         &self,
         genre: &str,
-    ) -> Result<HearthisTrack, Box<dyn std::error::Error>> {
+    ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         // Convert genre to slug format (lowercase, spaces to hyphens)
         let genre_slug = genre.to_lowercase().replace(' ', "-");
 
