@@ -156,34 +156,70 @@ impl ScheduleEngine {
                 let now = Local::now();
                 debug!("Schedule check at {}", now.format("%H:%M:%S"));
 
-                if let Some((ref program_name, end_time)) = current_program {
+                // Calculate how long to sleep
+                let sleep_duration = if let Some((ref program_name, end_time)) = current_program {
+                    // A program is running, check if it should end
                     if now >= end_time {
                         info!("Program '{}' ended, returning to library", program_name);
                         if let Err(e) = self.command_tx.send(PlaylistCommand::ReturnToLibrary) {
                             error!("Failed to send return to library command: {}", e);
                         }
                         current_program = None;
+                        std::time::Duration::from_secs(1) // Check again soon
+                    } else {
+                        // Sleep until the program ends (or check every 5 seconds, whichever is sooner)
+                        let time_until_end = (end_time - now).num_seconds().max(0) as u64;
+                        std::time::Duration::from_secs(time_until_end.min(5))
                     }
-                } else if let Some((program, start_time)) = self.find_next_program() {
-                    if start_time <= now {
-                        self.start_program(program, &now, &mut current_program);
-                    }
-                }
+                } else {
+                    // No program running, check for next scheduled program
+                    if let Some((program, start_time)) = self.find_next_program(&now) {
+                        // Allow a tolerance window: start if scheduled time is in the past but within last 2 seconds
+                        let tolerance = Duration::seconds(2);
+                        let earliest_start = now - tolerance;
 
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        if start_time >= earliest_start && start_time <= now {
+                            // Start this program now
+                            self.start_program(program, &now, &mut current_program);
+                            std::time::Duration::from_secs(1) // Check again soon
+                        } else {
+                            // Calculate time until next program (or check every 30 seconds, whichever is sooner)
+                            let time_until_start = (start_time - now).num_seconds().max(1) as u64; // Minimum 1 second
+                            debug!(
+                                "Next program '{}' starts in {} seconds",
+                                program.name, time_until_start
+                            );
+                            std::time::Duration::from_secs(time_until_start.min(30))
+                        }
+                    } else {
+                        // No programs scheduled, check again in 30 seconds
+                        std::time::Duration::from_secs(30)
+                    }
+                };
+
+                tokio::time::sleep(sleep_duration).await;
             }
         });
     }
 
-    fn find_next_program(&self) -> Option<(&ValidatedProgram, DateTime<Local>)> {
+    fn find_next_program(&self, now: &DateTime<Local>) -> Option<(&ValidatedProgram, DateTime<Local>)> {
+        // Find the next scheduled program
+        // Use `after()` instead of `upcoming()` to include times that are exactly now
+        // `upcoming()` only returns strictly FUTURE times, so at 20:00:00 it returns 20:01:00
+        // `after()` with a time slightly in the past includes the current minute
+
+        let tolerance = Duration::seconds(2);
+        let check_from = *now - tolerance;
+
         self.programs
             .iter()
             .filter_map(|program| {
-                program
-                    .schedule
-                    .upcoming(Local)
-                    .next()
-                    .map(|next_time| (program, next_time))
+                // Get the next occurrence after (now - tolerance)
+                // This way, if we're at 20:00:01, we check from 19:59:59 and get 20:00:00
+                let mut after_iter = program.schedule.after(&check_from);
+                let next_time = after_iter.next()?;
+
+                Some((program, next_time))
             })
             .min_by_key(|(_, next_time)| *next_time)
     }

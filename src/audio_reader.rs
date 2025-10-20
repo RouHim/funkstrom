@@ -208,52 +208,35 @@ impl AudioReader {
                                 name, genres
                             );
 
-                            let client = HearthisClient::new();
-                            match client {
-                                Ok(client) => {
-                                    // Spawn a task to fetch the liveset
-                                    let name_clone = name.clone();
-                                    let genres_clone = genres.clone();
+                            // Spawn a detached task to fetch the liveset
+                            // We can't await here because we're holding a mutable reference to self
+                            let name_for_task = name.clone();
+                            let duration_for_task = duration;
 
-                                    match tokio::runtime::Handle::try_current() {
-                                        Ok(handle) => {
-                                            let future = async move {
-                                                client.get_random_liveset(&genres_clone).await
-                                            };
-
-                                            match handle.block_on(future) {
-                                                Ok(track) => {
-                                                    info!(
-                                                        "Fetched liveset: '{}' by {} ({})",
-                                                        track.title,
-                                                        track.user.username,
-                                                        track.genre
-                                                    );
-
-                                                    // Use PathBuf to store the stream URL
-                                                    // FFmpeg can handle HTTP URLs directly
-                                                    let stream_path =
-                                                        PathBuf::from(track.stream_url);
-                                                    self.switch_to_scheduled_playlist(
-                                                        name_clone,
-                                                        vec![stream_path],
-                                                        duration,
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    error!("Failed to fetch liveset: {}", e);
-                                                }
-                                            }
+                            tokio::spawn(async move {
+                                match HearthisClient::new() {
+                                    Ok(client) => match client.get_random_liveset(&genres).await {
+                                        Ok(track) => {
+                                            info!(
+                                                "Fetched liveset: '{}' by {} ({})",
+                                                track.title, track.user.username, track.genre
+                                            );
+                                            // We'll need to send this back via a channel
+                                            // For now, just log success - will implement channel next
                                         }
                                         Err(e) => {
-                                            error!("No tokio runtime available: {}", e);
+                                            error!("Failed to fetch liveset: {}", e);
                                         }
+                                    },
+                                    Err(e) => {
+                                        error!("Failed to create hearthis client: {}", e);
                                     }
                                 }
-                                Err(e) => {
-                                    error!("Failed to create hearthis client: {}", e);
-                                }
-                            }
+                            });
+
+                            // TODO: Properly integrate liveset fetching with playlist switching
+                            // For now,continue with library playback
+                            error!("Liveset integration needs channel-based communication - continuing with library");
                         }
                         Ok(PlaylistCommand::ReturnToLibrary) => {
                             self.return_to_library();
