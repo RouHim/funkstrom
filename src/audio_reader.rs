@@ -199,15 +199,18 @@ impl AudioReader {
                         }
                         Ok(PlaylistCommand::SwitchToLiveset {
                             name,
-                            genres,
-                            duration,
+                            genres: _genres,
+                            duration: _duration,
                         }) => {
-                            // Fetch liveset from hearthis.at API
-                            info!(
-                                "Fetching liveset for program '{}' (genres: {:?})",
-                                name, genres
+                            // TODO: Properly integrate liveset fetching with playlist switching
+                            // Temporary: Just log and continue with library playback
+                            error!(
+                                "Liveset program '{}' triggered but async integration not yet implemented",
+                                name
                             );
+                            // For now, continue with library playback
 
+                            /* COMMENTED OUT - NEEDS ASYNC REFACTORING
                             // Spawn a detached task to fetch the liveset
                             // We can't await here because we're holding a mutable reference to self
                             let name_for_task = name.clone();
@@ -233,10 +236,7 @@ impl AudioReader {
                                     }
                                 }
                             });
-
-                            // TODO: Properly integrate liveset fetching with playlist switching
-                            // For now,continue with library playback
-                            error!("Liveset integration needs channel-based communication - continuing with library");
+                            */
                         }
                         Ok(PlaylistCommand::ReturnToLibrary) => {
                             self.return_to_library();

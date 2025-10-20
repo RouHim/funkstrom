@@ -323,6 +323,7 @@ impl ScheduleEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     #[test]
     fn given_duration_string_with_minutes_when_parsed_then_returns_correct_duration() {
@@ -430,5 +431,252 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("Invalid duration format"));
+    }
+
+    #[test]
+    fn test_find_next_program_at_exact_minute_boundary() {
+        // Test that a program scheduled at exactly 20:00:00 is found when queried at 20:00:00
+        let program = ScheduleProgram {
+            name: "exact_time".to_string(),
+            active: true,
+            cron: "0 0 20 * * *".to_string(), // Every day at 20:00:00
+            duration: "1h".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
+        };
+
+        // Create a minimal test file for validation
+        let temp_track = std::env::temp_dir().join("test_track_exact.mp3");
+        std::fs::write(&temp_track, "").unwrap();
+
+        let temp_file = std::env::temp_dir().join("test_exact_boundary.m3u");
+        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+
+        let mut program = program;
+        program.playlist = Some(temp_file.to_string_lossy().to_string());
+
+        let engine = ScheduleEngine::new(vec![program]).unwrap();
+
+        // Query at exactly 20:00:00
+        let now = Local::now()
+            .date_naive()
+            .and_hms_opt(20, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap();
+
+        let result = engine.find_next_program(&now);
+
+        // Should find the program within tolerance window
+        assert!(result.is_some());
+        let (found_program, scheduled_time) = result.unwrap();
+        assert_eq!(found_program.name, "exact_time");
+
+        // Scheduled time should be at 20:00:00
+        assert_eq!(scheduled_time.hour(), 20);
+        assert_eq!(scheduled_time.minute(), 0);
+        assert_eq!(scheduled_time.second(), 0);
+
+        std::fs::remove_file(&temp_file).ok();
+        std::fs::remove_file(&temp_track).ok();
+    }
+
+    #[test]
+    fn test_find_next_program_within_tolerance_window() {
+        // Test that a program scheduled at 20:00:00 is found when queried at 20:00:01
+        let program = ScheduleProgram {
+            name: "tolerance_test".to_string(),
+            active: true,
+            cron: "0 0 20 * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
+        };
+
+        let temp_track = std::env::temp_dir().join("test_track_tolerance.mp3");
+        std::fs::write(&temp_track, "").unwrap();
+
+        let temp_file = std::env::temp_dir().join("test_tolerance.m3u");
+        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+
+        let mut program = program;
+        program.playlist = Some(temp_file.to_string_lossy().to_string());
+
+        let engine = ScheduleEngine::new(vec![program]).unwrap();
+
+        // Query at 20:00:01 (1 second after scheduled time)
+        let now = Local::now()
+            .date_naive()
+            .and_hms_opt(20, 0, 1)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap();
+
+        let result = engine.find_next_program(&now);
+
+        // Should still find the program within 2-second tolerance
+        assert!(result.is_some());
+        let (found_program, scheduled_time) = result.unwrap();
+        assert_eq!(found_program.name, "tolerance_test");
+
+        // Scheduled time should be at 20:00:00 (the original time)
+        assert_eq!(scheduled_time.hour(), 20);
+        assert_eq!(scheduled_time.minute(), 0);
+        assert_eq!(scheduled_time.second(), 0);
+
+        std::fs::remove_file(&temp_file).ok();
+        std::fs::remove_file(&temp_track).ok();
+    }
+
+    #[test]
+    fn test_find_next_program_outside_tolerance_window() {
+        // Test that a program scheduled at 20:00:00 is NOT found when queried at 20:00:03
+        let program = ScheduleProgram {
+            name: "outside_tolerance".to_string(),
+            active: true,
+            cron: "0 0 20 * * *".to_string(),
+            duration: "30m".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
+        };
+
+        let temp_track = std::env::temp_dir().join("test_track_outside.mp3");
+        std::fs::write(&temp_track, "").unwrap();
+
+        let temp_file = std::env::temp_dir().join("test_outside_tolerance.m3u");
+        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+
+        let mut program = program;
+        program.playlist = Some(temp_file.to_string_lossy().to_string());
+
+        let engine = ScheduleEngine::new(vec![program]).unwrap();
+
+        // Query at 20:00:03 (3 seconds after scheduled time, outside 2-second tolerance)
+        let now = Local::now()
+            .date_naive()
+            .and_hms_opt(20, 0, 3)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap();
+
+        let result = engine.find_next_program(&now);
+
+        if let Some((_, scheduled_time)) = result {
+            // If found, it should be the next occurrence (tomorrow at 20:00:00)
+            assert!(scheduled_time > now);
+            // Should be more than 23 hours away
+            assert!((scheduled_time - now).num_hours() >= 23);
+        }
+
+        std::fs::remove_file(&temp_file).ok();
+        std::fs::remove_file(&temp_track).ok();
+    }
+
+    #[test]
+    fn test_find_next_program_with_multiple_programs() {
+        // Test that when multiple programs are scheduled, the nearest one is returned
+        let program1 = ScheduleProgram {
+            name: "program1".to_string(),
+            active: true,
+            cron: "0 0 21 * * *".to_string(), // 21:00:00
+            duration: "1h".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test1.m3u".to_string()),
+            genres: None,
+        };
+
+        let program2 = ScheduleProgram {
+            name: "program2".to_string(),
+            active: true,
+            cron: "0 30 20 * * *".to_string(), // 20:30:00
+            duration: "30m".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test2.m3u".to_string()),
+            genres: None,
+        };
+
+        let temp_track1 = std::env::temp_dir().join("test_track_multi1.mp3");
+        let temp_track2 = std::env::temp_dir().join("test_track_multi2.mp3");
+        std::fs::write(&temp_track1, "").unwrap();
+        std::fs::write(&temp_track2, "").unwrap();
+
+        let temp_file1 = std::env::temp_dir().join("test_multi1.m3u");
+        let temp_file2 = std::env::temp_dir().join("test_multi2.m3u");
+        std::fs::write(&temp_file1, format!("{}\n", temp_track1.to_string_lossy())).unwrap();
+        std::fs::write(&temp_file2, format!("{}\n", temp_track2.to_string_lossy())).unwrap();
+
+        let mut program1 = program1;
+        let mut program2 = program2;
+        program1.playlist = Some(temp_file1.to_string_lossy().to_string());
+        program2.playlist = Some(temp_file2.to_string_lossy().to_string());
+
+        let engine = ScheduleEngine::new(vec![program1, program2]).unwrap();
+
+        // Query at 20:00:00
+        let now = Local::now()
+            .date_naive()
+            .and_hms_opt(20, 0, 0)
+            .unwrap()
+            .and_local_timezone(Local)
+            .unwrap();
+
+        let result = engine.find_next_program(&now);
+
+        // Should find program2 (20:30:00) as it's the nearest future program
+        assert!(result.is_some());
+        let (found_program, scheduled_time) = result.unwrap();
+        assert_eq!(found_program.name, "program2");
+        assert_eq!(scheduled_time.hour(), 20);
+        assert_eq!(scheduled_time.minute(), 30);
+
+        std::fs::remove_file(&temp_file1).ok();
+        std::fs::remove_file(&temp_file2).ok();
+        std::fs::remove_file(&temp_track1).ok();
+        std::fs::remove_file(&temp_track2).ok();
+    }
+
+    #[test]
+    fn test_find_next_program_no_programs_scheduled() {
+        // Test behavior when no programs are scheduled for today
+        // This tests the case where find_next_program returns None
+        let program = ScheduleProgram {
+            name: "future_program".to_string(),
+            active: true,
+            // Scheduled for a very specific time that's unlikely to match
+            cron: "0 37 3 1 1 *".to_string(), // Jan 1st at 03:37:00
+            duration: "1h".to_string(),
+            program_type: Some("playlist".to_string()),
+            playlist: Some("test.m3u".to_string()),
+            genres: None,
+        };
+
+        let temp_track = std::env::temp_dir().join("test_track_future.mp3");
+        std::fs::write(&temp_track, "").unwrap();
+
+        let temp_file = std::env::temp_dir().join("test_future.m3u");
+        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+
+        let mut program = program;
+        program.playlist = Some(temp_file.to_string_lossy().to_string());
+
+        let engine = ScheduleEngine::new(vec![program]).unwrap();
+
+        // Query at a time that doesn't match
+        let now = Local::now();
+
+        let result = engine.find_next_program(&now);
+
+        // Should find the next occurrence in the future
+        assert!(result.is_some());
+        let (_, scheduled_time) = result.unwrap();
+
+        // Scheduled time should be in the future
+        assert!(scheduled_time > now);
+
+        std::fs::remove_file(&temp_file).ok();
+        std::fs::remove_file(&temp_track).ok();
     }
 }
