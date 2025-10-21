@@ -144,7 +144,7 @@ pub enum ProgramType {
 }
 
 impl Config {
-    pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_file(path: &PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let content = fs::read_to_string(path)?;
         let config: Config = toml::from_str(&content)?;
 
@@ -155,7 +155,7 @@ impl Config {
     }
 
     /// Validates the entire configuration
-    fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Check for empty stream configuration
         if self.stream.is_empty() {
             return Err("No streams configured. At least one stream must be defined in [stream.NAME] section".into());
