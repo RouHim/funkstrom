@@ -3,3 +3,4 @@
 *.log
 /data
 config.toml
+*_test_*.toml

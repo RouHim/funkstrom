@@ -46,7 +46,7 @@ struct StreamPipeline {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     env_logger::init();
     std::fs::create_dir_all("./data")?;
 
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn initialize_library(
     config: &Config,
-) -> Result<(LibraryDatabase, LibraryScanner), Box<dyn std::error::Error>> {
+) -> Result<(LibraryDatabase, LibraryScanner), Box<dyn std::error::Error + Send + Sync>> {
     let db = LibraryDatabase::new("./data/database.db")?;
     db.initialize_schema()?;
 
@@ -179,7 +179,7 @@ fn setup_audio_pipeline(
     config: &Config,
     db: LibraryDatabase,
     schedule_rx: Option<Receiver<PlaylistCommand>>,
-) -> Result<AudioPipeline, Box<dyn std::error::Error>> {
+) -> Result<AudioPipeline, Box<dyn std::error::Error + Send + Sync>> {
     let music_dir = PathBuf::from(&config.library.music_directory);
     let audio_reader =
         AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;

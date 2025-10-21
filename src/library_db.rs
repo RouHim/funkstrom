@@ -28,7 +28,7 @@ pub struct LibraryDatabase {
 }
 
 impl LibraryDatabase {
-    pub fn new(db_path: &str) -> Result<Self, Box<dyn Error>> {
+    pub fn new(db_path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::builder().max_size(5).build(manager)?;
 
@@ -37,7 +37,7 @@ impl LibraryDatabase {
         Ok(Self { pool })
     }
 
-    pub fn initialize_schema(&self) -> Result<(), Box<dyn Error>> {
+    pub fn initialize_schema(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut conn = self.pool.get()?;
 
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -98,7 +98,7 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn insert_track(&self, track: &TrackRecord) -> Result<i64, Box<dyn Error>> {
+    pub fn insert_track(&self, track: &TrackRecord) -> Result<i64, Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
 
         conn.execute(
@@ -122,7 +122,10 @@ impl LibraryDatabase {
         Ok(conn.last_insert_rowid())
     }
 
-    pub fn insert_tracks_batch(&self, tracks: &[TrackRecord]) -> Result<(), Box<dyn Error>> {
+    pub fn insert_tracks_batch(
+        &self,
+        tracks: &[TrackRecord],
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut conn = self.pool.get()?;
         let tx = conn.transaction()?;
 
@@ -153,7 +156,7 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn update_track(&self, track: &TrackRecord) -> Result<(), Box<dyn Error>> {
+    pub fn update_track(&self, track: &TrackRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
 
         conn.execute(
@@ -176,7 +179,10 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn update_tracks_batch(&self, tracks: &[TrackRecord]) -> Result<(), Box<dyn Error>> {
+    pub fn update_tracks_batch(
+        &self,
+        tracks: &[TrackRecord],
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut conn = self.pool.get()?;
         let tx = conn.transaction()?;
 
@@ -206,7 +212,7 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn delete_track(&self, file_path: &str) -> Result<(), Box<dyn Error>> {
+    pub fn delete_track(&self, file_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
         conn.execute(
             "DELETE FROM tracks WHERE file_path = ?1",
@@ -215,7 +221,10 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn delete_tracks_batch(&self, file_paths: &[String]) -> Result<(), Box<dyn Error>> {
+    pub fn delete_tracks_batch(
+        &self,
+        file_paths: &[String],
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut conn = self.pool.get()?;
         let tx = conn.transaction()?;
 
@@ -231,7 +240,7 @@ impl LibraryDatabase {
         Ok(())
     }
 
-    pub fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, Box<dyn Error>> {
+    pub fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
 
         let mut stmt = conn.prepare(
@@ -261,7 +270,7 @@ impl LibraryDatabase {
         Ok(tracks)
     }
 
-    pub fn get_track_keys(&self) -> Result<Vec<TrackKey>, Box<dyn Error>> {
+    pub fn get_track_keys(&self) -> Result<Vec<TrackKey>, Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
 
         let mut stmt = conn.prepare("SELECT id, file_path, last_modified FROM tracks")?;
@@ -273,13 +282,13 @@ impl LibraryDatabase {
         Ok(keys)
     }
 
-    pub fn track_count(&self) -> Result<usize, Box<dyn Error>> {
+    pub fn track_count(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 
-    pub fn get_metadata(&self, key: &str) -> Result<Option<String>, Box<dyn Error>> {
+    pub fn get_metadata(&self, key: &str) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
         let result = conn
             .query_row(
@@ -291,7 +300,7 @@ impl LibraryDatabase {
         Ok(result)
     }
 
-    pub fn set_metadata(&self, key: &str, value: &str) -> Result<(), Box<dyn Error>> {
+    pub fn set_metadata(&self, key: &str, value: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         let conn = self.pool.get()?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?

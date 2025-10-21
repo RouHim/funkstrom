@@ -29,7 +29,7 @@ impl LibraryScanner {
         }
     }
 
-    pub fn full_scan(&self) -> Result<ScanResult, Box<dyn Error>> {
+    pub fn full_scan(&self) -> Result<ScanResult, Box<dyn Error + Send + Sync>> {
         info!("Starting full library scan in: {:?}", self.music_directory);
 
         let mut result = ScanResult {
@@ -99,7 +99,7 @@ impl LibraryScanner {
         Ok(result)
     }
 
-    pub fn incremental_scan(&self) -> Result<ScanResult, Box<dyn Error>> {
+    pub fn incremental_scan(&self) -> Result<ScanResult, Box<dyn Error + Send + Sync>> {
         info!("Starting incremental library scan");
 
         let mut result = ScanResult {
@@ -265,7 +265,7 @@ impl LibraryScanner {
         &self,
         dir: &Path,
         files: &mut Vec<PathBuf>,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let entries = fs::read_dir(dir)?;
 
         for entry in entries {
@@ -297,7 +297,7 @@ impl LibraryScanner {
         }
     }
 
-    fn process_file(&self, path: &Path) -> Result<TrackRecord, Box<dyn Error>> {
+    fn process_file(&self, path: &Path) -> Result<TrackRecord, Box<dyn Error + Send + Sync>> {
         let file_path = path.to_string_lossy().to_string();
         let metadata = fs::metadata(path)?;
         let file_size = metadata.len() as i64;
@@ -359,7 +359,7 @@ impl LibraryScanner {
         })
     }
 
-    fn get_file_mtime(&self, path: &Path) -> Result<i64, Box<dyn Error>> {
+    fn get_file_mtime(&self, path: &Path) -> Result<i64, Box<dyn Error + Send + Sync>> {
         let metadata = fs::metadata(path)?;
         let mtime = metadata.modified()?.duration_since(UNIX_EPOCH)?.as_secs() as i64;
         Ok(mtime)
