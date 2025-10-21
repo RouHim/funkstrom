@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 pub struct M3uParser;
 
 impl M3uParser {
-    pub fn parse(playlist_path: &Path) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    pub fn parse(
+        playlist_path: &Path,
+    ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error + Send + Sync>> {
         if !playlist_path.exists() {
             return Err(format!("M3U playlist not found: {:?}", playlist_path).into());
         }
@@ -46,7 +48,9 @@ impl M3uParser {
         Ok(tracks)
     }
 
-    pub fn validate_playlist(playlist_path: &Path) -> Result<usize, Box<dyn std::error::Error>> {
+    pub fn validate_playlist(
+        playlist_path: &Path,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
         let tracks = Self::parse(playlist_path)?;
         Ok(tracks.len())
     }

@@ -5,6 +5,10 @@ use std::io::{BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+// Constants for audio processing configuration
+const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
+const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
+
 pub struct FFmpegProcessor {
     ffmpeg_path: String,
     sample_rate: u32,
@@ -44,7 +48,7 @@ impl FFmpegProcessor {
         }
     }
 
-    pub fn check_ffmpeg_available(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn check_ffmpeg_available(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         debug!("Checking FFmpeg availability at: {}", self.ffmpeg_path);
 
         let output = Command::new(&self.ffmpeg_path)
@@ -67,7 +71,7 @@ impl FFmpegProcessor {
     pub fn start_conversion_process(
         &self,
         input_path: &Path,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error>> {
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         let input_str = input_path.to_str().unwrap();
         self.start_conversion(input_str)
     }
@@ -75,11 +79,14 @@ impl FFmpegProcessor {
     pub fn start_conversion_from_url(
         &self,
         url: &str,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error>> {
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         self.start_conversion(url)
     }
 
-    fn start_conversion(&self, input: &str) -> Result<AudioProcess, Box<dyn std::error::Error>> {
+    fn start_conversion(
+        &self,
+        input: &str,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         info!("Starting FFmpeg conversion for: {}", input);
 
         // Only check file existence for local files (not URLs)
@@ -188,7 +195,8 @@ impl FFmpegProcessor {
                 }
 
                 // Small delay to avoid busy waiting
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(PROCESS_POLL_INTERVAL_MS))
+                    .await;
             }
         });
 
@@ -207,9 +215,11 @@ impl AudioProcess {
         Self { child, reader }
     }
 
-    pub fn read_chunk(&mut self) -> Result<Option<Bytes>, Box<dyn std::error::Error>> {
+    pub fn read_chunk(
+        &mut self,
+    ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref mut reader) = self.reader {
-            let mut buffer = [0u8; 8192]; // 8KB chunks
+            let mut buffer = [0u8; AUDIO_CHUNK_SIZE];
 
             match reader.read(&mut buffer) {
                 Ok(0) => {
@@ -228,7 +238,7 @@ impl AudioProcess {
         }
     }
 
-    fn wait_for_completion(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn wait_for_completion(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self.child.wait() {
             Ok(status) => {
                 if status.success() {

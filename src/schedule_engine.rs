@@ -39,7 +39,9 @@ struct ValidatedProgram {
 }
 
 impl ScheduleEngine {
-    pub fn new(programs: Vec<ScheduleProgram>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        programs: Vec<ScheduleProgram>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let (command_tx, command_rx) = unbounded();
 
         let validated_programs = programs
@@ -72,7 +74,7 @@ impl ScheduleEngine {
 
     fn validate_and_convert(
         program: &ScheduleProgram,
-    ) -> Result<ValidatedProgram, Box<dyn std::error::Error>> {
+    ) -> Result<ValidatedProgram, Box<dyn std::error::Error + Send + Sync>> {
         // Validate program-specific fields
         program
             .validate()
@@ -119,7 +121,9 @@ impl ScheduleEngine {
         })
     }
 
-    fn parse_duration(duration_str: &str) -> Result<Duration, Box<dyn std::error::Error>> {
+    fn parse_duration(
+        duration_str: &str,
+    ) -> Result<Duration, Box<dyn std::error::Error + Send + Sync>> {
         let duration_str = duration_str.trim();
 
         if let Some(minutes_str) = duration_str.strip_suffix('m') {
@@ -202,7 +206,10 @@ impl ScheduleEngine {
         });
     }
 
-    fn find_next_program(&self, now: &DateTime<Local>) -> Option<(&ValidatedProgram, DateTime<Local>)> {
+    fn find_next_program(
+        &self,
+        now: &DateTime<Local>,
+    ) -> Option<(&ValidatedProgram, DateTime<Local>)> {
         // Find the next scheduled program
         // Use `after()` instead of `upcoming()` to include times that are exactly now
         // `upcoming()` only returns strictly FUTURE times, so at 20:00:00 it returns 20:01:00
@@ -434,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_next_program_at_exact_minute_boundary() {
+    fn given_program_scheduled_at_exact_minute_when_queried_at_same_time_then_finds_program() {
         // Test that a program scheduled at exactly 20:00:00 is found when queried at 20:00:00
         let program = ScheduleProgram {
             name: "exact_time".to_string(),
@@ -447,14 +454,17 @@ mod tests {
         };
 
         // Create a minimal test file for validation
-        let temp_track = std::env::temp_dir().join("test_track_exact.mp3");
-        std::fs::write(&temp_track, "").unwrap();
-
-        let temp_file = std::env::temp_dir().join("test_exact_boundary.m3u");
-        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+        use tempfile::NamedTempFile;
+        let temp_track = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            format!("{}\n", temp_track.path().to_string_lossy()),
+        )
+        .unwrap();
 
         let mut program = program;
-        program.playlist = Some(temp_file.to_string_lossy().to_string());
+        program.playlist = Some(temp_file.path().to_string_lossy().to_string());
 
         let engine = ScheduleEngine::new(vec![program]).unwrap();
 
@@ -477,13 +487,11 @@ mod tests {
         assert_eq!(scheduled_time.hour(), 20);
         assert_eq!(scheduled_time.minute(), 0);
         assert_eq!(scheduled_time.second(), 0);
-
-        std::fs::remove_file(&temp_file).ok();
-        std::fs::remove_file(&temp_track).ok();
+        // Files automatically cleaned up when temp_track and temp_file drop
     }
 
     #[test]
-    fn test_find_next_program_within_tolerance_window() {
+    fn given_program_scheduled_when_queried_within_tolerance_then_finds_program() {
         // Test that a program scheduled at 20:00:00 is found when queried at 20:00:01
         let program = ScheduleProgram {
             name: "tolerance_test".to_string(),
@@ -495,14 +503,17 @@ mod tests {
             genres: None,
         };
 
-        let temp_track = std::env::temp_dir().join("test_track_tolerance.mp3");
-        std::fs::write(&temp_track, "").unwrap();
-
-        let temp_file = std::env::temp_dir().join("test_tolerance.m3u");
-        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+        use tempfile::NamedTempFile;
+        let temp_track = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            format!("{}\n", temp_track.path().to_string_lossy()),
+        )
+        .unwrap();
 
         let mut program = program;
-        program.playlist = Some(temp_file.to_string_lossy().to_string());
+        program.playlist = Some(temp_file.path().to_string_lossy().to_string());
 
         let engine = ScheduleEngine::new(vec![program]).unwrap();
 
@@ -525,13 +536,11 @@ mod tests {
         assert_eq!(scheduled_time.hour(), 20);
         assert_eq!(scheduled_time.minute(), 0);
         assert_eq!(scheduled_time.second(), 0);
-
-        std::fs::remove_file(&temp_file).ok();
-        std::fs::remove_file(&temp_track).ok();
+        // Files automatically cleaned up when temp_track and temp_file drop
     }
 
     #[test]
-    fn test_find_next_program_outside_tolerance_window() {
+    fn given_program_scheduled_when_queried_outside_tolerance_then_finds_next_occurrence() {
         // Test that a program scheduled at 20:00:00 is NOT found when queried at 20:00:03
         let program = ScheduleProgram {
             name: "outside_tolerance".to_string(),
@@ -543,14 +552,17 @@ mod tests {
             genres: None,
         };
 
-        let temp_track = std::env::temp_dir().join("test_track_outside.mp3");
-        std::fs::write(&temp_track, "").unwrap();
-
-        let temp_file = std::env::temp_dir().join("test_outside_tolerance.m3u");
-        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+        use tempfile::NamedTempFile;
+        let temp_track = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            format!("{}\n", temp_track.path().to_string_lossy()),
+        )
+        .unwrap();
 
         let mut program = program;
-        program.playlist = Some(temp_file.to_string_lossy().to_string());
+        program.playlist = Some(temp_file.path().to_string_lossy().to_string());
 
         let engine = ScheduleEngine::new(vec![program]).unwrap();
 
@@ -570,13 +582,11 @@ mod tests {
             // Should be more than 23 hours away
             assert!((scheduled_time - now).num_hours() >= 23);
         }
-
-        std::fs::remove_file(&temp_file).ok();
-        std::fs::remove_file(&temp_track).ok();
+        // Files automatically cleaned up when temp_track and temp_file drop
     }
 
     #[test]
-    fn test_find_next_program_with_multiple_programs() {
+    fn given_multiple_programs_when_finding_next_then_returns_nearest_program() {
         // Test that when multiple programs are scheduled, the nearest one is returned
         let program1 = ScheduleProgram {
             name: "program1".to_string(),
@@ -598,20 +608,27 @@ mod tests {
             genres: None,
         };
 
-        let temp_track1 = std::env::temp_dir().join("test_track_multi1.mp3");
-        let temp_track2 = std::env::temp_dir().join("test_track_multi2.mp3");
-        std::fs::write(&temp_track1, "").unwrap();
-        std::fs::write(&temp_track2, "").unwrap();
+        use tempfile::NamedTempFile;
+        let temp_track1 = NamedTempFile::new().unwrap();
+        let temp_track2 = NamedTempFile::new().unwrap();
 
-        let temp_file1 = std::env::temp_dir().join("test_multi1.m3u");
-        let temp_file2 = std::env::temp_dir().join("test_multi2.m3u");
-        std::fs::write(&temp_file1, format!("{}\n", temp_track1.to_string_lossy())).unwrap();
-        std::fs::write(&temp_file2, format!("{}\n", temp_track2.to_string_lossy())).unwrap();
+        let temp_file1 = NamedTempFile::new().unwrap();
+        let temp_file2 = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file1.path(),
+            format!("{}\n", temp_track1.path().to_string_lossy()),
+        )
+        .unwrap();
+        std::fs::write(
+            temp_file2.path(),
+            format!("{}\n", temp_track2.path().to_string_lossy()),
+        )
+        .unwrap();
 
         let mut program1 = program1;
         let mut program2 = program2;
-        program1.playlist = Some(temp_file1.to_string_lossy().to_string());
-        program2.playlist = Some(temp_file2.to_string_lossy().to_string());
+        program1.playlist = Some(temp_file1.path().to_string_lossy().to_string());
+        program2.playlist = Some(temp_file2.path().to_string_lossy().to_string());
 
         let engine = ScheduleEngine::new(vec![program1, program2]).unwrap();
 
@@ -631,15 +648,11 @@ mod tests {
         assert_eq!(found_program.name, "program2");
         assert_eq!(scheduled_time.hour(), 20);
         assert_eq!(scheduled_time.minute(), 30);
-
-        std::fs::remove_file(&temp_file1).ok();
-        std::fs::remove_file(&temp_file2).ok();
-        std::fs::remove_file(&temp_track1).ok();
-        std::fs::remove_file(&temp_track2).ok();
+        // Files automatically cleaned up when temp files drop
     }
 
     #[test]
-    fn test_find_next_program_no_programs_scheduled() {
+    fn given_future_program_when_finding_next_then_returns_next_occurrence() {
         // Test behavior when no programs are scheduled for today
         // This tests the case where find_next_program returns None
         let program = ScheduleProgram {
@@ -653,14 +666,17 @@ mod tests {
             genres: None,
         };
 
-        let temp_track = std::env::temp_dir().join("test_track_future.mp3");
-        std::fs::write(&temp_track, "").unwrap();
-
-        let temp_file = std::env::temp_dir().join("test_future.m3u");
-        std::fs::write(&temp_file, format!("{}\n", temp_track.to_string_lossy())).unwrap();
+        use tempfile::NamedTempFile;
+        let temp_track = NamedTempFile::new().unwrap();
+        let temp_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            temp_file.path(),
+            format!("{}\n", temp_track.path().to_string_lossy()),
+        )
+        .unwrap();
 
         let mut program = program;
-        program.playlist = Some(temp_file.to_string_lossy().to_string());
+        program.playlist = Some(temp_file.path().to_string_lossy().to_string());
 
         let engine = ScheduleEngine::new(vec![program]).unwrap();
 
@@ -675,8 +691,6 @@ mod tests {
 
         // Scheduled time should be in the future
         assert!(scheduled_time > now);
-
-        std::fs::remove_file(&temp_file).ok();
-        std::fs::remove_file(&temp_track).ok();
+        // Files automatically cleaned up when temp_track and temp_file drop
     }
 }

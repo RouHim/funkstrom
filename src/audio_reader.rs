@@ -9,14 +9,14 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+// Constants for audio reader configuration
+const TRACK_BUFFER_SIZE: usize = 2; // Number of tracks to buffer ahead
+const SCHEDULE_CHECK_INTERVAL_MS: u64 = 100; // How often to check for schedule commands
+
 #[derive(Debug, Clone)]
 enum PlaylistSource {
     Library,
-    Scheduled {
-        #[allow(dead_code)]
-        name: String,
-        end_time: std::time::Instant,
-    },
+    Scheduled { end_time: std::time::Instant },
 }
 
 // Struct to track pending liveset fetch requests
@@ -58,7 +58,7 @@ impl AudioReader {
         shuffle: bool,
         repeat: bool,
         db: LibraryDatabase,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let tracks = db.get_all_tracks()?;
 
         if tracks.is_empty() {
@@ -120,7 +120,7 @@ impl AudioReader {
                         return None;
                     }
                 }
-                PlaylistSource::Scheduled { name: _, end_time } => {
+                PlaylistSource::Scheduled { end_time } => {
                     if std::time::Instant::now() >= *end_time {
                         info!("Scheduled program ended, returning to library");
                         self.return_to_library();
@@ -153,7 +153,7 @@ impl AudioReader {
         let duration_std = std::time::Duration::from_secs(duration.num_seconds() as u64);
         let end_time = std::time::Instant::now() + duration_std;
 
-        self.playlist_source = PlaylistSource::Scheduled { name, end_time };
+        self.playlist_source = PlaylistSource::Scheduled { end_time };
     }
 
     pub fn return_to_library(&mut self) {
@@ -188,12 +188,13 @@ impl AudioReader {
         mut self,
         schedule_command_rx: Option<Receiver<PlaylistCommand>>,
     ) -> Receiver<PathBuf> {
-        // Use bounded channel with capacity of 2 to keep 1-2 tracks buffered ahead
+        // Use bounded channel to keep tracks buffered ahead
         // This provides backpressure and prevents flooding the channel
-        let (track_tx, track_rx) = bounded::<PathBuf>(2);
+        let (track_tx, track_rx) = bounded::<PathBuf>(TRACK_BUFFER_SIZE);
 
         // Channel for receiving fetched livesets from async tasks
-        let (liveset_tx, liveset_rx) = bounded::<(PendingLiveset, Result<HearthisTrack, String>)>(1);
+        let (liveset_tx, liveset_rx) =
+            bounded::<(PendingLiveset, Result<HearthisTrack, String>)>(1);
 
         tokio::spawn(async move {
             loop {
@@ -322,7 +323,10 @@ impl AudioReader {
                 }
 
                 // Small delay to check for schedule commands periodically
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(
+                    SCHEDULE_CHECK_INTERVAL_MS,
+                ))
+                .await;
             }
         });
 
