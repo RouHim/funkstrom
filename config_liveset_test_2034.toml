@@ -1,0 +1,26 @@
+[server]
+port = 8284
+bind_address = "127.0.0.1"
+
+[library]
+music_directory = "/home/rouven/projects/funkstrom/test_music"
+shuffle = true
+repeat = true
+
+[station]
+station_name = "Deep Sea Radio - Liveset E2E Test"
+description = "Testing liveset integration"
+genre = "Electronic"
+url = "http://localhost:8284"
+
+[stream.test]
+bitrate = 128
+format = "mp3"
+sample_rate = 44100
+channels = 2
+enabled = true
+
+[schedule]
+programs = [
+    { name = "E2E Liveset Test 20:34", active = true, type = "liveset", cron = "0 34 20 * * *", duration = "2m", genres = ["techno", "house"] }
+]

@@ -25,7 +25,7 @@ Vibe: Oceanic, calm, professional with mysterious depth
 ## Code Style Guidelines
 
 - Breaking changes are allowed because the app is not released yet; no migration is needed when implementing new
-  features or changes.
+  features or changes. There is currently NO user which uses this!!!
 - `cargo run` hangs until the process gets killed, thus always start the application in the background using `nohup`
 - **Error Handling**: Use `Result<T, Box<dyn std::error::Error>>` for fallible functions
 - **Async**: Use tokio runtime, prefer async/await over blocking operations

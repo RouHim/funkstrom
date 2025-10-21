@@ -1,4 +1,5 @@
 use crate::audio_metadata::TrackMetadata;
+use crate::hearthis_client::{HearthisClient, HearthisTrack};
 use crate::library_db::LibraryDatabase;
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
@@ -16,6 +17,13 @@ enum PlaylistSource {
         name: String,
         end_time: std::time::Instant,
     },
+}
+
+// Struct to track pending liveset fetch requests
+#[derive(Debug)]
+struct PendingLiveset {
+    name: String,
+    duration: Duration,
 }
 
 fn shuffle_playlist(playlist: &mut VecDeque<PathBuf>) {
@@ -184,6 +192,9 @@ impl AudioReader {
         // This provides backpressure and prevents flooding the channel
         let (track_tx, track_rx) = bounded::<PathBuf>(2);
 
+        // Channel for receiving fetched livesets from async tasks
+        let (liveset_tx, liveset_rx) = bounded::<(PendingLiveset, Result<HearthisTrack, String>)>(1);
+
         tokio::spawn(async move {
             loop {
                 // Check for schedule commands
@@ -196,10 +207,82 @@ impl AudioReader {
                         }) => {
                             self.switch_to_scheduled_playlist(name, tracks, duration);
                         }
+                        Ok(PlaylistCommand::SwitchToLiveset {
+                            name,
+                            genres,
+                            duration,
+                        }) => {
+                            // Fetch liveset from hearthis.at API asynchronously
+                            info!(
+                                "Fetching liveset for program '{}' (genres: {:?})",
+                                name, genres
+                            );
+
+                            // Spawn async task to fetch liveset and send result back via channel
+                            let tx = liveset_tx.clone();
+                            let pending = PendingLiveset {
+                                name: name.clone(),
+                                duration,
+                            };
+
+                            tokio::spawn(async move {
+                                let result = match HearthisClient::new() {
+                                    Ok(client) => match client.get_random_liveset(&genres).await {
+                                        Ok(track) => {
+                                            info!(
+                                                "Fetched liveset: '{}' by {} ({})",
+                                                track.title, track.user.username, track.genre
+                                            );
+                                            Ok(track)
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to fetch liveset: {}", e);
+                                            Err(format!("API error: {}", e))
+                                        }
+                                    },
+                                    Err(e) => {
+                                        error!("Failed to create hearthis client: {}", e);
+                                        Err(format!("Client error: {}", e))
+                                    }
+                                };
+
+                                // Send result back to main loop
+                                if tx.send((pending, result)).is_err() {
+                                    error!("Failed to send liveset result - receiver dropped");
+                                }
+                            });
+                        }
                         Ok(PlaylistCommand::ReturnToLibrary) => {
                             self.return_to_library();
                         }
                         Err(_) => {}
+                    }
+                }
+
+                // Check for liveset fetch results
+                if let Ok((pending, result)) = liveset_rx.try_recv() {
+                    match result {
+                        Ok(track) => {
+                            info!(
+                                "Liveset fetched successfully for program '{}': '{}' by {}",
+                                pending.name, track.title, track.user.username
+                            );
+
+                            // Switch to the liveset by treating the stream URL as a track
+                            let liveset_url = PathBuf::from(track.stream_url);
+                            self.switch_to_scheduled_playlist(
+                                pending.name,
+                                vec![liveset_url],
+                                pending.duration,
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch liveset for program '{}': {}. Continuing with library.",
+                                pending.name, e
+                            );
+                            // Continue with library playback on error
+                        }
                     }
                 }
 

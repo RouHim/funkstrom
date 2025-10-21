@@ -4,6 +4,7 @@ mod audio_processor;
 mod audio_reader;
 mod cli;
 mod config;
+mod hearthis_client;
 mod library_db;
 mod library_scanner;
 mod m3u_parser;
