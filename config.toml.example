@@ -99,10 +99,17 @@ enabled = false  # Disabled by default
 # ============================================================================
 # Schedule Configuration (Optional)
 # ============================================================================
-# Schedule specific playlists to play at certain times.
+# Schedule specific playlists or livesets to play at certain times.
 # Uses cron syntax for scheduling.
 # When a scheduled program is active, it temporarily overrides the main library.
+#
+# Program Types:
+# - "playlist" (default): Plays tracks from a local M3U playlist file
+# - "liveset": Fetches and streams electronic music livesets from hearthis.at API
 
+# ============================================================================
+# Playlist Programs
+# ============================================================================
 [[schedule.programs]]
 # Program name (for logging)
 name = "Morning Show"
@@ -118,7 +125,10 @@ cron = "0 6 * * 1-5"
 # Format: "1h", "30m", "2h30m", etc.
 duration = "3h"
 
-# Path to M3U playlist file
+# Program type (optional, defaults to "playlist")
+type = "playlist"
+
+# Path to M3U playlist file (required for playlist programs)
 playlist = "/path/to/playlists/morning.m3u"
 
 [[schedule.programs]]
@@ -126,4 +136,67 @@ name = "Evening Jazz"
 active = false
 cron = "0 19 * * *"
 duration = "2h"
+type = "playlist"
 playlist = "/path/to/playlists/jazz.m3u"
+
+# ============================================================================
+# Liveset Programs (hearthis.at API Integration)
+# ============================================================================
+# Available genres (case-insensitive, spaces converted to hyphens):
+#
+# Electronic/Dance: techno, house, deephouse, progressivehouse, techhouse,
+#   trance, psytrance, dubstep, dub, dubtechno, drumandbass, jungle,
+#   breakbeat, breakcore, hardcore, hardstyle, edm, electro, electonica,
+#   futurebass, idm, organichouse, garage, bass, dance
+#
+# Hip Hop/Urban: hiphop, trap, urban, dancehall
+#
+# Pop/Rock: pop, rock, indie, punk, heavymetal, industrial
+#
+# Soul/Funk: soul, funk, rnb, disco
+#
+# Acoustic/Instrumental: acoustic, instrumental, songwriter, folk, country, blues
+#
+# Ambient/Chill: ambient, chillout, downtempo, lofi
+#
+# World: bollywood, indian, reggae (note: API has "raggae"), world, amapiano
+#
+# Other: jazz, classical, orchestral, experimental, soundart, spiritual,
+#   podcast, audiobook, radioshow, clubs, festival, soundtrack,
+#   livestreams, replays, other
+
+[[schedule.programs]]
+name = "Techno Night"
+
+# Enable this program
+active = false
+
+# Every Friday and Saturday at 10 PM
+cron = "0 22 * * 5,6"
+
+# Duration
+duration = "4h"
+
+# Program type for hearthis.at integration
+type = "liveset"
+
+# Genres to fetch from (tries each in order, falls back to general feed if none found)
+# Use empty array [] to fetch from general feed (popular recent tracks across all genres)
+genres = ["techno", "techhouse", "dubtechno"]
+
+[[schedule.programs]]
+name = "Electronic Morning"
+active = false
+cron = "0 8 * * 0"  # Sunday mornings at 8 AM
+duration = "2h"
+type = "liveset"
+# Empty genres array fetches from general feed (all genres)
+genres = []
+
+[[schedule.programs]]
+name = "Deep House Session"
+active = false
+cron = "0 14 * * 6"  # Saturday afternoons at 2 PM
+duration = "3h"
+type = "liveset"
+genres = ["deephouse", "house", "organichouse"]

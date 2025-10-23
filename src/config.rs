@@ -595,4 +595,70 @@ enabled = true
 
         assert_eq!(program.get_type(), ProgramType::Liveset);
     }
+
+    #[test]
+    fn test_example_config_file_is_valid() {
+        // Test that config.toml.example parses correctly
+        let config_path = PathBuf::from("config.toml.example");
+
+        if !config_path.exists() {
+            // Skip test if example file doesn't exist
+            return;
+        }
+
+        let result = Config::from_file(&config_path);
+
+        match &result {
+            Ok(config) => {
+                // Verify schedule section exists and programs are valid
+                if let Some(schedule) = &config.schedule {
+                    let mut has_liveset_program = false;
+                    let mut has_playlist_program = false;
+
+                    for program in &schedule.programs {
+                        // Validate each program
+                        assert!(
+                            program.validate().is_ok(),
+                            "Program '{}' validation failed: {:?}",
+                            program.name,
+                            program.validate().err()
+                        );
+
+                        // Track program types found
+                        match program.get_type() {
+                            ProgramType::Liveset => {
+                                has_liveset_program = true;
+                                assert!(
+                                    program.genres.is_some(),
+                                    "Liveset program '{}' should have genres field",
+                                    program.name
+                                );
+                            }
+                            ProgramType::Playlist => {
+                                has_playlist_program = true;
+                                assert!(
+                                    program.playlist.is_some(),
+                                    "Playlist program '{}' should have playlist field",
+                                    program.name
+                                );
+                            }
+                        }
+                    }
+
+                    // Ensure example config demonstrates both program types
+                    assert!(
+                        has_liveset_program,
+                        "Example config should include at least one liveset program"
+                    );
+                    assert!(
+                        has_playlist_program,
+                        "Example config should include at least one playlist program"
+                    );
+                }
+            }
+            Err(e) => {
+                panic!("config.toml.example failed to parse: {}", e);
+            }
+        }
+    }
 }
