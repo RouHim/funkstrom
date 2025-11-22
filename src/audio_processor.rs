@@ -5,24 +5,50 @@ use std::io::{BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
+// Constants for audio processing configuration
+const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
+const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
+
 pub struct FFmpegProcessor {
     ffmpeg_path: String,
     sample_rate: u32,
     bitrate: u32,
     channels: u8,
+    format: String,
 }
 
 impl FFmpegProcessor {
-    pub fn new(ffmpeg_path: Option<String>, sample_rate: u32, bitrate: u32, channels: u8) -> Self {
+    pub fn new(
+        ffmpeg_path: Option<String>,
+        sample_rate: u32,
+        bitrate: u32,
+        channels: u8,
+        format: String,
+    ) -> Self {
         Self {
             ffmpeg_path: ffmpeg_path.unwrap_or_else(|| "ffmpeg".to_string()),
             sample_rate,
             bitrate,
             channels,
+            format,
         }
     }
 
-    pub fn check_ffmpeg_available(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn get_codec_for_format(&self, format: &str) -> &str {
+        match format {
+            "mp3" => "libmp3lame",
+            "opus" => "libopus",
+            "aac" => "aac",
+            "vorbis" | "ogg" => "libvorbis",
+            "flac" => "flac",
+            _ => {
+                warn!("Unknown format '{}', defaulting to libmp3lame", format);
+                "libmp3lame"
+            }
+        }
+    }
+
+    pub fn check_ffmpeg_available(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         debug!("Checking FFmpeg availability at: {}", self.ffmpeg_path);
 
         let output = Command::new(&self.ffmpeg_path)
@@ -45,21 +71,42 @@ impl FFmpegProcessor {
     pub fn start_conversion_process(
         &self,
         input_path: &Path,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error>> {
-        info!("Starting FFmpeg conversion for: {:?}", input_path);
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
+        let input_str = input_path.to_str().unwrap();
+        self.start_conversion(input_str)
+    }
 
-        if !input_path.exists() {
-            return Err(format!("Input file does not exist: {:?}", input_path).into());
+    pub fn start_conversion_from_url(
+        &self,
+        url: &str,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
+        self.start_conversion(url)
+    }
+
+    fn start_conversion(
+        &self,
+        input: &str,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
+        info!("Starting FFmpeg conversion for: {}", input);
+
+        // Only check file existence for local files (not URLs)
+        if !input.starts_with("http://") && !input.starts_with("https://") {
+            let path = Path::new(input);
+            if !path.exists() {
+                return Err(format!("Input file does not exist: {}", input).into());
+            }
         }
+
+        let codec = self.get_codec_for_format(&self.format);
 
         let mut cmd = Command::new(&self.ffmpeg_path);
         cmd.args([
             "-i",
-            input_path.to_str().unwrap(),
+            input,
             "-f",
-            "mp3",
+            &self.format,
             "-acodec",
-            "libmp3lame",
+            codec,
             "-ab",
             &format!("{}k", self.bitrate),
             "-ar",
@@ -97,7 +144,19 @@ impl FFmpegProcessor {
                     // Try to get next track
                     if let Ok(track) = track_rx.try_recv() {
                         current_track = Some(track.clone());
-                        match self.start_conversion_process(&track) {
+
+                        // Check if track is a URL or local file
+                        let track_str = track.to_str().unwrap_or("");
+                        let result = if track_str.starts_with("http://")
+                            || track_str.starts_with("https://")
+                        {
+                            info!("Starting stream from URL: {}", track_str);
+                            self.start_conversion_from_url(track_str)
+                        } else {
+                            self.start_conversion_process(&track)
+                        };
+
+                        match result {
                             Ok(process) => {
                                 info!("Started processing track: {:?}", track);
                                 current_process = Some(process);
@@ -136,7 +195,8 @@ impl FFmpegProcessor {
                 }
 
                 // Small delay to avoid busy waiting
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(PROCESS_POLL_INTERVAL_MS))
+                    .await;
             }
         });
 
@@ -155,9 +215,11 @@ impl AudioProcess {
         Self { child, reader }
     }
 
-    pub fn read_chunk(&mut self) -> Result<Option<Bytes>, Box<dyn std::error::Error>> {
+    pub fn read_chunk(
+        &mut self,
+    ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref mut reader) = self.reader {
-            let mut buffer = [0u8; 8192]; // 8KB chunks
+            let mut buffer = [0u8; AUDIO_CHUNK_SIZE];
 
             match reader.read(&mut buffer) {
                 Ok(0) => {
@@ -176,7 +238,7 @@ impl AudioProcess {
         }
     }
 
-    fn wait_for_completion(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn wait_for_completion(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         match self.child.wait() {
             Ok(status) => {
                 if status.success() {
@@ -197,4 +259,51 @@ impl AudioProcess {
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
     pub data: Bytes,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        assert_eq!(processor.get_codec_for_format("mp3"), "libmp3lame");
+    }
+
+    #[test]
+    fn given_opus_format_when_getting_codec_then_returns_libopus() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "opus".to_string());
+        assert_eq!(processor.get_codec_for_format("opus"), "libopus");
+    }
+
+    #[test]
+    fn given_aac_format_when_getting_codec_then_returns_aac() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
+        assert_eq!(processor.get_codec_for_format("aac"), "aac");
+    }
+
+    #[test]
+    fn given_vorbis_format_when_getting_codec_then_returns_libvorbis() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "vorbis".to_string());
+        assert_eq!(processor.get_codec_for_format("vorbis"), "libvorbis");
+    }
+
+    #[test]
+    fn given_ogg_format_when_getting_codec_then_returns_libvorbis() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
+        assert_eq!(processor.get_codec_for_format("ogg"), "libvorbis");
+    }
+
+    #[test]
+    fn given_flac_format_when_getting_codec_then_returns_flac() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
+        assert_eq!(processor.get_codec_for_format("flac"), "flac");
+    }
+
+    #[test]
+    fn given_unknown_format_when_getting_codec_then_returns_default_libmp3lame() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
+        assert_eq!(processor.get_codec_for_format("unknown"), "libmp3lame");
+    }
 }

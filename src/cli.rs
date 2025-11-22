@@ -2,16 +2,16 @@ use clap::{Arg, Command};
 use std::path::PathBuf;
 
 pub fn build_cli() -> Command {
-    Command::new("iradio")
-        .version("0.1.0")
-        .about("Icecast-compatible internet radio server")
+    Command::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
                 .value_name("FILE")
                 .help("Sets a custom config file")
-                .default_value("config.toml"),
+                .default_value("./data/config.toml"),
         )
 }
 
