@@ -4,7 +4,7 @@ use crate::library_db::LibraryDatabase;
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
 use crossbeam_channel::{bounded, Receiver};
-use log::{error, info};
+use log::{debug, error, info};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -289,7 +289,7 @@ impl AudioReader {
 
                 // Get next track
                 if let Some(track) = self.next_track() {
-                    info!("Next track: {:?}", track);
+                    debug!("Next track: {:?}", track);
 
                     // This will block when channel is full (backpressure)
                     // Blocking is moved to tokio blocking thread to avoid blocking async runtime
