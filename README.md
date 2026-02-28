@@ -32,7 +32,7 @@ Funkstrom reads audio files from your configured music directory, transcodes the
 Docker Example:
 
 ```bash
-docker run -p 3002:3002 \
+docker run -p 8284:8284 \
         -v /path/to/music:/music:ro \
         rouhim/funkstrom
 ```
@@ -46,7 +46,7 @@ services:
     volumes:
       - /path/to/music:/music:ro
     ports:
-      - "3002:3002"
+      - "8284:8284"
     environment:
       - RUST_LOG=info
 ```
@@ -82,15 +82,20 @@ Create a configuration file `config.toml`:
 
 ```toml
 [server]
-port = 3002
+port = 8284
 bind_address = "127.0.0.1"
 
-[audio]
+[library]
 music_directory = "/path/to/music"
 shuffle = true
 repeat = true
-bitrate = 128
 
+[stream.standard]
+bitrate = 128
+format = "mp3"
+sample_rate = 44100
+channels = 2
+enabled = true
 [station]
 name = "My Radio Station"
 description = "Great music 24/7"
@@ -103,7 +108,7 @@ Start the server:
 ./funkstrom --config config.toml
 ```
 
-Then open your browser at `http://127.0.0.1:3002/` or stream audio at `http://127.0.0.1:3002/stream`
+Then open your browser at `http://127.0.0.1:8284/` or stream audio at `http://127.0.0.1:8284/stream`
 
 ## Configuration
 
@@ -111,12 +116,12 @@ All configuration is done via the `config.toml` file:
 
 | Section | Key | Description | Default | Required |
 |---------|-----|-------------|---------|----------|
-| `[server]` | `port` | Port on which the server should listen | `3002` | No |
+| `[server]` | `port` | Port on which the server should listen | `8284` | No |
 | `[server]` | `bind_address` | IP address to bind to | `127.0.0.1` | No |
-| `[audio]` | `music_directory` | Path to music directory | - | Yes |
-| `[audio]` | `shuffle` | Shuffle playback order | `true` | No |
-| `[audio]` | `repeat` | Repeat playlist when finished | `true` | No |
-| `[audio]` | `bitrate` | MP3 bitrate in kbps | `128` | No |
+| `[library]` | `music_directory` | Path to music directory | - | Yes |
+| `[library]` | `shuffle` | Shuffle playback order | `true` | No |
+| `[library]` | `repeat` | Repeat playlist when finished | `true` | No |
+| `[stream.NAME]` | `bitrate` | MP3 bitrate in kbps | `128` | No |
 | `[station]` | `name` | Station name (Icecast header) | `"My Radio Station"` | No |
 | `[station]` | `description` | Station description | `"Great music 24/7"` | No |
 | `[station]` | `genre` | Station genre | `"Various"` | No |
