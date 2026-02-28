@@ -72,7 +72,7 @@ impl FFmpegProcessor {
         &self,
         input_path: &Path,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        let input_str = input_path.to_str().unwrap();
+        let input_str = input_path.to_str().ok_or_else(|| format!("Path contains invalid UTF-8 characters: {}", input_path.display()))?;
         self.start_conversion(input_str)
     }
 

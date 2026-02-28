@@ -8,8 +8,6 @@ type TrackKey = (i64, String, i64);
 
 #[derive(Debug, Clone)]
 pub struct TrackRecord {
-    #[allow(dead_code)] // Field populated from database, used for internal tracking
-    pub id: Option<i64>,
     pub file_path: String,
     pub title: String,
     pub artist: String,
@@ -252,7 +250,6 @@ impl LibraryDatabase {
         let tracks = stmt
             .query_map([], |row| {
                 Ok(TrackRecord {
-                    id: row.get(0)?,
                     file_path: row.get(1)?,
                     title: row.get(2)?,
                     artist: row.get(3)?,
@@ -331,7 +328,6 @@ mod tests {
 
     fn create_test_track(file_path: &str) -> TrackRecord {
         TrackRecord {
-            id: None,
             file_path: file_path.to_string(),
             title: "Test Song".to_string(),
             artist: "Test Artist".to_string(),
@@ -365,7 +361,6 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0].file_path, "/music/song1.mp3");
         assert_eq!(tracks[0].title, "Test Song");
-        assert_eq!(tracks[0].id, Some(id));
     }
 
     #[test]

@@ -55,6 +55,7 @@ struct StreamLink {
 struct StreamContext {
     buffer: StreamBuffer,
     bitrate: u32,
+    format: String,
     station_name: String,
     station_description: String,
     station_genre: String,
@@ -69,6 +70,7 @@ pub struct IcecastServer {
     current_metadata: Arc<Mutex<TrackMetadata>>,
     bind_address: Arc<Mutex<String>>,
     port: Arc<Mutex<u16>>,
+    start_time: Instant,
 }
 
 #[derive(Clone)]
@@ -76,11 +78,12 @@ struct StreamEndpoint {
     name: String,
     buffer: StreamBuffer,
     bitrate: u32,
+    format: String,
 }
 
 impl IcecastServer {
     pub fn new(
-        stream_buffers: Vec<(String, StreamBuffer, u32)>,
+        stream_buffers: Vec<(String, StreamBuffer, u32, String)>,
         station_name: String,
         station_description: String,
         station_genre: String,
@@ -88,10 +91,11 @@ impl IcecastServer {
     ) -> Self {
         let streams = stream_buffers
             .into_iter()
-            .map(|(name, buffer, bitrate)| StreamEndpoint {
+            .map(|(name, buffer, bitrate, format)| StreamEndpoint {
                 name,
                 buffer,
                 bitrate,
+                format,
             })
             .collect();
 
@@ -103,13 +107,14 @@ impl IcecastServer {
             current_metadata,
             bind_address: Arc::new(Mutex::new(String::new())),
             port: Arc::new(Mutex::new(0)),
+            start_time: Instant::now(),
         }
     }
 
-    pub async fn start_server(&self, bind_address: &str, port: u16) {
+    pub async fn start_server(&self, bind_address: &str, port: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Store bind_address and port for use in info page
-        *self.bind_address.lock().unwrap() = bind_address.to_string();
-        *self.port.lock().unwrap() = port;
+        *self.bind_address.lock().unwrap_or_else(|e| e.into_inner()) = bind_address.to_string();
+        *self.port.lock().unwrap_or_else(|e| e.into_inner()) = port;
 
         let server = Arc::new(self.clone());
 
@@ -135,6 +140,7 @@ impl IcecastServer {
                             let context = StreamContext {
                                 buffer: stream.buffer.clone(),
                                 bitrate: stream.bitrate,
+                                format: stream.format.clone(),
                                 station_name: station_name.clone(),
                                 station_description: station_description.clone(),
                                 station_genre: station_genre.clone(),
@@ -185,9 +191,9 @@ impl IcecastServer {
         log::info!("API Docs: http://{}:{}/api-docs", bind_address, port);
 
         let addr: std::net::SocketAddr = format!("{}:{}", bind_address, port)
-            .parse()
-            .expect("Invalid bind address");
+            .parse()?;
         warp::serve(routes).run(addr).await;
+        Ok(())
     }
 
     async fn handle_stream_request(
@@ -237,7 +243,12 @@ impl IcecastServer {
         let server_version = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
         let response = warp::http::Response::builder()
-            .header("Content-Type", "audio/mpeg")
+            .header("Content-Type", match context.format.to_lowercase().as_str() {
+                "aac" => "audio/aac",
+                "ogg" => "audio/ogg",
+                "opus" => "audio/ogg",
+                _ => "audio/mpeg",
+            })
             .header("Cache-Control", "no-cache, no-store")
             .header("Connection", "close")
             .header("Pragma", "no-cache")
@@ -249,10 +260,12 @@ impl IcecastServer {
             .header("icy-description", &context.station_description)
             .header("icy-genre", &context.station_genre)
             .header("icy-br", context.bitrate.to_string())
-            .header("icy-metaint", "16000")
             .header("Server", &server_version)
             .body(hyper::Body::wrap_stream(stream))
-            .unwrap();
+            .map_err(|e| {
+                log::error!("Failed to build HTTP response: {}", e);
+                warp::reject::reject()
+            })?;
 
         Ok(response)
     }
@@ -283,10 +296,19 @@ impl IcecastServer {
             station_description: self.station_description.clone(),
             station_genre: self.station_genre.clone(),
             streams,
-            uptime: "unknown".to_string(),
+            uptime: {
+                let elapsed = self.start_time.elapsed().as_secs();
+                let h = elapsed / 3600;
+                let m = (elapsed % 3600) / 60;
+                let s = elapsed % 60;
+                format!("{}h {}m {}s", h, m, s)
+            },
         };
 
-        let json = serde_json::to_string(&response).unwrap();
+        let json = serde_json::to_string(&response).map_err(|e| {
+            log::error!("Failed to serialize status response: {}", e);
+            warp::reject::reject()
+        })?;
 
         Ok(warp::reply::with_header(
             json,
@@ -296,7 +318,7 @@ impl IcecastServer {
     }
 
     async fn handle_current_request(&self) -> Result<impl Reply, warp::Rejection> {
-        let metadata = self.current_metadata.lock().unwrap();
+        let metadata = self.current_metadata.lock().unwrap_or_else(|e| e.into_inner());
         let json = metadata.to_json();
 
         Ok(warp::reply::with_header(
@@ -307,12 +329,12 @@ impl IcecastServer {
     }
 
     async fn handle_info_request(&self) -> Result<impl Reply, warp::Rejection> {
-        let metadata = self.current_metadata.lock().unwrap();
+        let metadata = self.current_metadata.lock().unwrap_or_else(|e| e.into_inner());
         let current_track = metadata.to_icy_metadata();
         let album = &metadata.album;
 
-        let bind_address = self.bind_address.lock().unwrap().clone();
-        let port = *self.port.lock().unwrap();
+        let bind_address = self.bind_address.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let port = *self.port.lock().unwrap_or_else(|e| e.into_inner());
 
         // Build streams list for template context
         let streams: Vec<StreamLink> = self

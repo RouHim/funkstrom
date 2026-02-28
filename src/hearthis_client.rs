@@ -26,7 +26,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use funkstrom::hearthis_client::HearthisClient;
+//! use crate::hearthis_client::HearthisClient;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let client = HearthisClient::new()?;

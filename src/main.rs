@@ -43,6 +43,7 @@ struct StreamPipeline {
     name: String,
     receiver: Receiver<AudioChunk>,
     bitrate: u32,
+    format: String,
 }
 
 #[tokio::main]
@@ -73,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let handle = start_buffer_writer(&stream_buffer, pipeline.receiver);
         buffer_writer_handles.push(handle);
 
-        stream_buffers.push((pipeline.name, stream_buffer, pipeline.bitrate));
+        stream_buffers.push((pipeline.name, stream_buffer, pipeline.bitrate, pipeline.format.clone()));
     }
 
     // Start server
@@ -89,7 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         _ = server_handle => log::error!("Icecast server stopped"),
         _ = async {
             for handle in buffer_writer_handles {
-                let _ = handle.await;
+                if let Err(e) = handle.await {
+                    log::error!("Buffer writer task failed: {}", e);
+                }
             }
         } => log::error!("All buffer writers stopped"),
         _ = nightly_rescan_handle => log::error!("Nightly rescan stopped"),
@@ -221,6 +224,7 @@ fn setup_audio_pipeline(
             name: name.clone(),
             receiver: audio_rx,
             bitrate: stream_config.bitrate,
+            format: stream_config.format.clone(),
         });
     }
 
@@ -268,7 +272,7 @@ fn start_buffer_writer(
 
 fn start_server(
     config: &Config,
-    stream_buffers: Vec<(String, StreamBuffer, u32)>,
+    stream_buffers: Vec<(String, StreamBuffer, u32, String)>,
     current_metadata: Arc<Mutex<TrackMetadata>>,
 ) -> JoinHandle<()> {
     let server = IcecastServer::new(
@@ -282,7 +286,9 @@ fn start_server(
     let bind_address = config.server.bind_address.clone();
     let port = config.server.port;
     tokio::spawn(async move {
-        server.start_server(&bind_address, port).await;
+        if let Err(e) = server.start_server(&bind_address, port).await {
+            log::error!("Server failed: {}", e);
+        }
     })
 }
 
@@ -290,19 +296,22 @@ fn start_nightly_rescan(scanner: LibraryScanner) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let now = chrono::Local::now();
-            let next_scan = now
-                .date_naive()
-                .succ_opt()
-                .unwrap()
-                .and_hms_opt(3, 0, 0)
-                .unwrap()
-                .and_local_timezone(chrono::Local)
-                .unwrap();
-            let duration = (next_scan - now).to_std().unwrap();
+            
+            // Calculate next scan time (3:00 AM tomorrow)
+            let fallback_duration = std::time::Duration::from_secs(24 * 3600);
+            
+            let duration = match calculate_next_scan_duration(&now) {
+                Ok(d) => d,
+                Err(e) => {
+                    log::warn!("Failed to calculate next scan time: {}, using 24h fallback", e);
+                    fallback_duration
+                }
+            };
 
+            let next_scan_info = now + chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::seconds(24 * 3600));
             log::info!(
                 "Next library scan scheduled at {}",
-                next_scan.format("%Y-%m-%d %H:%M:%S")
+                next_scan_info.format("%Y-%m-%d %H:%M:%S")
             );
 
             tokio::time::sleep(duration).await;
@@ -325,6 +334,32 @@ fn start_nightly_rescan(scanner: LibraryScanner) -> JoinHandle<()> {
             }
         }
     })
+}
+
+fn calculate_next_scan_duration(now: &chrono::DateTime<chrono::Local>) -> Result<std::time::Duration, String> {
+    // Get tomorrow's date at 3:00 AM
+    let tomorrow = now
+        .date_naive()
+        .succ_opt()
+        .ok_or_else(|| "Failed to calculate next day".to_string())?;
+    
+    // Create time 3:00 AM - this is a constant so it's safe
+    let time_3am = tomorrow
+        .and_hms_opt(3, 0, 0)
+        .expect("3:00:00 is always a valid time");
+    
+    // Handle DST ambiguity by using earliest()
+    let next_scan = time_3am
+        .and_local_timezone(chrono::Local)
+        .earliest()
+        .ok_or_else(|| "Failed to apply timezone".to_string())?;
+    
+    // Calculate duration; if negative (clock jump), fallback to 24h
+    let duration = (next_scan - *now)
+        .to_std()
+        .map_err(|_| "Duration calculation resulted in negative value".to_string())?;
+    
+    Ok(duration)
 }
 
 fn log_startup_info(config: &Config) {

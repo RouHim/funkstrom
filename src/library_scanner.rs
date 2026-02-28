@@ -345,7 +345,6 @@ impl LibraryScanner {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         Ok(TrackRecord {
-            id: None,
             file_path,
             title,
             artist,

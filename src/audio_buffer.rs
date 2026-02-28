@@ -93,7 +93,7 @@ impl StreamBuffer {
         let running = Arc::clone(&self.running);
 
         {
-            let mut running_guard = running.lock().unwrap();
+            let mut running_guard = running.lock().unwrap_or_else(|e| e.into_inner());
             *running_guard = true;
         }
 
@@ -107,7 +107,7 @@ impl StreamBuffer {
 
                 match data {
                     Ok(Ok(bytes)) => {
-                        let mut buffer_guard = buffer.lock().unwrap();
+                        let mut buffer_guard = buffer.lock().unwrap_or_else(|e| e.into_inner());
                         buffer_guard.push(bytes);
                     }
                     Ok(Err(_)) => break,
@@ -115,13 +115,13 @@ impl StreamBuffer {
                 }
             }
 
-            let mut running_guard = running.lock().unwrap();
+            let mut running_guard = running.lock().unwrap_or_else(|e| e.into_inner());
             *running_guard = false;
         });
     }
 
     pub fn read_chunk(&self, max_size: usize) -> Option<Bytes> {
-        let mut buffer_guard = self.buffer.lock().unwrap();
+        let mut buffer_guard = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
 
         if buffer_guard.is_empty() {
             return None;
@@ -154,12 +154,12 @@ impl StreamBuffer {
     }
 
     pub fn buffer_info(&self) -> (usize, usize) {
-        let buffer_guard = self.buffer.lock().unwrap();
+        let buffer_guard = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
         (buffer_guard.len(), buffer_guard.total_bytes())
     }
 
     pub fn is_running(&self) -> bool {
-        let running_guard = self.running.lock().unwrap();
+        let running_guard = self.running.lock().unwrap_or_else(|e| e.into_inner());
         *running_guard
     }
 }
