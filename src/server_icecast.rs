@@ -111,7 +111,11 @@ impl IcecastServer {
         }
     }
 
-    pub async fn start_server(&self, bind_address: &str, port: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn start_server(
+        &self,
+        bind_address: &str,
+        port: u16,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Store bind_address and port for use in info page
         *self.bind_address.lock().unwrap_or_else(|e| e.into_inner()) = bind_address.to_string();
         *self.port.lock().unwrap_or_else(|e| e.into_inner()) = port;
@@ -190,8 +194,7 @@ impl IcecastServer {
         log::info!("Starting Funkstrom server on {}:{}", bind_address, port);
         log::info!("API Docs: http://{}:{}/api-docs", bind_address, port);
 
-        let addr: std::net::SocketAddr = format!("{}:{}", bind_address, port)
-            .parse()?;
+        let addr: std::net::SocketAddr = format!("{}:{}", bind_address, port).parse()?;
         warp::serve(routes).run(addr).await;
         Ok(())
     }
@@ -243,12 +246,15 @@ impl IcecastServer {
         let server_version = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
         let response = warp::http::Response::builder()
-            .header("Content-Type", match context.format.to_lowercase().as_str() {
-                "aac" => "audio/aac",
-                "ogg" => "audio/ogg",
-                "opus" => "audio/ogg",
-                _ => "audio/mpeg",
-            })
+            .header(
+                "Content-Type",
+                match context.format.to_lowercase().as_str() {
+                    "aac" => "audio/aac",
+                    "ogg" => "audio/ogg",
+                    "opus" => "audio/ogg",
+                    _ => "audio/mpeg",
+                },
+            )
             .header("Cache-Control", "no-cache, no-store")
             .header("Connection", "close")
             .header("Pragma", "no-cache")
@@ -318,7 +324,10 @@ impl IcecastServer {
     }
 
     async fn handle_current_request(&self) -> Result<impl Reply, warp::Rejection> {
-        let metadata = self.current_metadata.lock().unwrap_or_else(|e| e.into_inner());
+        let metadata = self
+            .current_metadata
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let json = metadata.to_json();
 
         Ok(warp::reply::with_header(
@@ -329,11 +338,18 @@ impl IcecastServer {
     }
 
     async fn handle_info_request(&self) -> Result<impl Reply, warp::Rejection> {
-        let metadata = self.current_metadata.lock().unwrap_or_else(|e| e.into_inner());
+        let metadata = self
+            .current_metadata
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let current_track = metadata.to_icy_metadata();
         let album = &metadata.album;
 
-        let bind_address = self.bind_address.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let bind_address = self
+            .bind_address
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let port = *self.port.lock().unwrap_or_else(|e| e.into_inner());
 
         // Build streams list for template context

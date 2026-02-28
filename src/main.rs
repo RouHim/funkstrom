@@ -74,7 +74,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let handle = start_buffer_writer(&stream_buffer, pipeline.receiver);
         buffer_writer_handles.push(handle);
 
-        stream_buffers.push((pipeline.name, stream_buffer, pipeline.bitrate, pipeline.format.clone()));
+        stream_buffers.push((
+            pipeline.name,
+            stream_buffer,
+            pipeline.bitrate,
+            pipeline.format.clone(),
+        ));
     }
 
     // Start server
@@ -296,19 +301,24 @@ fn start_nightly_rescan(scanner: LibraryScanner) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let now = chrono::Local::now();
-            
+
             // Calculate next scan time (3:00 AM tomorrow)
             let fallback_duration = std::time::Duration::from_secs(24 * 3600);
-            
+
             let duration = match calculate_next_scan_duration(&now) {
                 Ok(d) => d,
                 Err(e) => {
-                    log::warn!("Failed to calculate next scan time: {}, using 24h fallback", e);
+                    log::warn!(
+                        "Failed to calculate next scan time: {}, using 24h fallback",
+                        e
+                    );
                     fallback_duration
                 }
             };
 
-            let next_scan_info = now + chrono::Duration::from_std(duration).unwrap_or(chrono::Duration::seconds(24 * 3600));
+            let next_scan_info = now
+                + chrono::Duration::from_std(duration)
+                    .unwrap_or(chrono::Duration::seconds(24 * 3600));
             log::info!(
                 "Next library scan scheduled at {}",
                 next_scan_info.format("%Y-%m-%d %H:%M:%S")
@@ -336,29 +346,31 @@ fn start_nightly_rescan(scanner: LibraryScanner) -> JoinHandle<()> {
     })
 }
 
-fn calculate_next_scan_duration(now: &chrono::DateTime<chrono::Local>) -> Result<std::time::Duration, String> {
+fn calculate_next_scan_duration(
+    now: &chrono::DateTime<chrono::Local>,
+) -> Result<std::time::Duration, String> {
     // Get tomorrow's date at 3:00 AM
     let tomorrow = now
         .date_naive()
         .succ_opt()
         .ok_or_else(|| "Failed to calculate next day".to_string())?;
-    
+
     // Create time 3:00 AM - this is a constant so it's safe
     let time_3am = tomorrow
         .and_hms_opt(3, 0, 0)
         .expect("3:00:00 is always a valid time");
-    
+
     // Handle DST ambiguity by using earliest()
     let next_scan = time_3am
         .and_local_timezone(chrono::Local)
         .earliest()
         .ok_or_else(|| "Failed to apply timezone".to_string())?;
-    
+
     // Calculate duration; if negative (clock jump), fallback to 24h
     let duration = (next_scan - *now)
         .to_std()
         .map_err(|_| "Duration calculation resulted in negative value".to_string())?;
-    
+
     Ok(duration)
 }
 
