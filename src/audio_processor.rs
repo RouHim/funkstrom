@@ -8,6 +8,14 @@ use std::process::{Child, Command, Stdio};
 // Constants for audio processing configuration
 const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
 const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
+const INITIAL_BACKOFF_MS: u64 = 1000;
+const MAX_BACKOFF_MS: u64 = 30_000;
+
+fn calculate_backoff_ms(consecutive_failures: u32) -> u64 {
+    let backoff =
+        INITIAL_BACKOFF_MS.saturating_mul(1u64.wrapping_shl(consecutive_failures.min(15)));
+    backoff.min(MAX_BACKOFF_MS)
+}
 
 pub struct FFmpegProcessor {
     ffmpeg_path: String,
@@ -72,7 +80,12 @@ impl FFmpegProcessor {
         &self,
         input_path: &Path,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        let input_str = input_path.to_str().ok_or_else(|| format!("Path contains invalid UTF-8 characters: {}", input_path.display()))?;
+        let input_str = input_path.to_str().ok_or_else(|| {
+            format!(
+                "Path contains invalid UTF-8 characters: {}",
+                input_path.display()
+            )
+        })?;
         self.start_conversion(input_str)
     }
 
@@ -87,7 +100,7 @@ impl FFmpegProcessor {
         &self,
         input: &str,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        info!("Starting FFmpeg conversion for: {}", input);
+        debug!("Starting FFmpeg conversion for: {}", input);
 
         // Only check file existence for local files (not URLs)
         if !input.starts_with("http://") && !input.starts_with("https://") {
@@ -137,6 +150,7 @@ impl FFmpegProcessor {
         tokio::spawn(async move {
             let mut current_process: Option<AudioProcess> = None;
             let mut current_track: Option<std::path::PathBuf> = None;
+            let mut consecutive_failures: u32 = 0;
 
             loop {
                 // Start new process if needed
@@ -158,12 +172,12 @@ impl FFmpegProcessor {
 
                         match result {
                             Ok(process) => {
-                                info!("Started processing track: {:?}", track);
+                                debug!("Started processing track: {:?}", track);
                                 current_process = Some(process);
                             }
                             Err(e) => {
                                 error!("Failed to start FFmpeg process for {:?}: {}", track, e);
-                                continue;
+                                consecutive_failures += 1;
                             }
                         }
                     }
@@ -179,24 +193,31 @@ impl FFmpegProcessor {
                                 warn!("Failed to send audio chunk - receiver dropped");
                                 break;
                             }
+                            consecutive_failures = 0;
                         }
                         Ok(None) => {
-                            // Process finished
-                            info!("Track processing completed: {:?}", current_track);
+                            // Process finished successfully
+                            info!("Track completed: {:?}", current_track);
                             current_process = None;
                             current_track = None;
+                            consecutive_failures = 0;
                         }
                         Err(e) => {
                             error!("Error reading from FFmpeg process: {}", e);
                             current_process = None;
                             current_track = None;
+                            consecutive_failures += 1;
                         }
                     }
                 }
 
                 // Small delay to avoid busy waiting
-                tokio::time::sleep(tokio::time::Duration::from_millis(PROCESS_POLL_INTERVAL_MS))
-                    .await;
+                let delay_ms = if consecutive_failures > 0 {
+                    calculate_backoff_ms(consecutive_failures)
+                } else {
+                    PROCESS_POLL_INTERVAL_MS
+                };
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
             }
         });
 
@@ -207,12 +228,18 @@ impl FFmpegProcessor {
 pub struct AudioProcess {
     child: Child,
     reader: Option<BufReader<std::process::ChildStdout>>,
+    stderr: Option<BufReader<std::process::ChildStderr>>,
 }
 
 impl AudioProcess {
     fn new(mut child: Child) -> Self {
         let reader = child.stdout.take().map(BufReader::new);
-        Self { child, reader }
+        let stderr = child.stderr.take().map(BufReader::new);
+        Self {
+            child,
+            reader,
+            stderr,
+        }
     }
 
     pub fn read_chunk(
@@ -224,8 +251,12 @@ impl AudioProcess {
             match reader.read(&mut buffer) {
                 Ok(0) => {
                     // EOF reached
-                    self.wait_for_completion()?;
-                    Ok(None)
+                    let success = self.wait_for_completion()?;
+                    if success {
+                        Ok(None)
+                    } else {
+                        Err("FFmpeg process exited with non-zero status".into())
+                    }
                 }
                 Ok(bytes_read) => Ok(Some(Bytes::copy_from_slice(&buffer[..bytes_read]))),
                 Err(e) => {
@@ -238,15 +269,28 @@ impl AudioProcess {
         }
     }
 
-    fn wait_for_completion(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn wait_for_completion(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let stderr_output = if let Some(ref mut stderr) = self.stderr {
+            let mut buf = Vec::with_capacity(4096);
+            let _ = stderr.by_ref().take(4096).read_to_end(&mut buf);
+            String::from_utf8_lossy(&buf).to_string()
+        } else {
+            String::new()
+        };
+
         match self.child.wait() {
             Ok(status) => {
                 if status.success() {
                     debug!("FFmpeg process completed successfully");
+                    Ok(true)
                 } else {
-                    warn!("FFmpeg process exited with status: {}", status);
+                    warn!(
+                        "FFmpeg process exited with status: {} - stderr: {}",
+                        status,
+                        stderr_output.trim()
+                    );
+                    Ok(false)
                 }
-                Ok(())
             }
             Err(e) => {
                 error!("Error waiting for FFmpeg process: {}", e);
@@ -255,7 +299,6 @@ impl AudioProcess {
         }
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
     pub data: Bytes,
@@ -305,5 +348,25 @@ mod tests {
     fn given_unknown_format_when_getting_codec_then_returns_default_libmp3lame() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
         assert_eq!(processor.get_codec_for_format("unknown"), "libmp3lame");
+    }
+
+    #[test]
+    fn given_zero_failures_when_calculating_backoff_then_returns_initial_backoff_ms() {
+        assert_eq!(calculate_backoff_ms(0), 1000);
+    }
+
+    #[test]
+    fn given_one_failure_when_calculating_backoff_then_returns_doubled_initial_backoff_ms() {
+        assert_eq!(calculate_backoff_ms(1), 2000);
+    }
+
+    #[test]
+    fn given_many_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
+        assert_eq!(calculate_backoff_ms(100), 30_000);
+    }
+
+    #[test]
+    fn given_max_u32_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
+        assert_eq!(calculate_backoff_ms(u32::MAX), 30_000);
     }
 }
