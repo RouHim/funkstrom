@@ -1,472 +1,639 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>{{ station_name }} - Funkstrom</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-            background: #0c1821;
-            color: #cffafe;
-            min-height: 100vh;
-            padding: 20px 15px;
-        }
-        .container {
-            max-width: 700px;
-            margin: 0 auto;
-            background: linear-gradient(135deg, rgba(8, 145, 178, 0.1) 0%, rgba(30, 64, 175, 0.1) 100%);
-            padding: 25px 20px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(103, 232, 249, 0.2);
-        }
-        h1 {
-            background: linear-gradient(135deg, #0891b2 0%, #1e40af 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            font-size: 2em;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 2px solid #14b8a6;
-            word-wrap: break-word;
-        }
-        h2 {
-            color: #67e8f9;
-            font-size: 1.3em;
-            margin-bottom: 12px;
-        }
-        h3 {
-            color: #67e8f9;
-            font-size: 1.1em;
-            margin-bottom: 10px;
-        }
-        .info {
-            background: rgba(12, 24, 33, 0.5);
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-            border: 1px solid rgba(20, 184, 166, 0.3);
-        }
-        .info p {
-            margin: 10px 0;
-            line-height: 1.6;
-            word-wrap: break-word;
-        }
-        .stream-button {
-            background: linear-gradient(135deg, #0891b2 0%, #1e40af 100%);
-            color: #cffafe;
-            padding: 10px 18px;
-            border: 1px solid rgba(103, 232, 249, 0.3);
-            border-radius: 6px;
-            display: inline-block;
-            margin: 6px 6px 6px 0;
-            transition: all 0.3s ease;
-            font-size: 0.95em;
-            cursor: pointer;
-        }
-        .stream-button:hover {
-            background: linear-gradient(135deg, #14b8a6 0%, #0891b2 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(20, 184, 166, 0.4);
-        }
-        .stream-button.active {
-            background: linear-gradient(135deg, #14b8a6 0%, #0891b2 100%);
-            border-color: #14b8a6;
-            box-shadow: 0 0 0 2px rgba(20, 184, 166, 0.3);
-        }
-        .endpoint-link {
-            background: rgba(30, 64, 175, 0.3);
-            color: #67e8f9;
-            padding: 8px 16px;
-            text-decoration: none;
-            border-radius: 6px;
-            display: inline-block;
-            margin: 6px 6px 6px 0;
-            transition: all 0.3s ease;
-            border: 1px solid rgba(103, 232, 249, 0.2);
-            font-size: 0.9em;
-        }
-        .endpoint-link:hover {
-            background: rgba(30, 64, 175, 0.5);
-            border-color: rgba(103, 232, 249, 0.4);
-            transform: translateY(-2px);
-        }
-        .status {
-            font-weight: bold;
-            color: #14b8a6;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .now-playing {
-            background: rgba(20, 184, 166, 0.1);
-            padding: 18px 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border-left: 4px solid #14b8a6;
-        }
-        .now-playing h2 {
-            margin-top: 0;
-            color: #14b8a6;
-        }
-        .track-info {
-            font-size: 1.1em;
-            margin: 12px 0;
-            color: #67e8f9;
-            font-weight: 500;
-            word-wrap: break-word;
-        }
-        code {
-            background: rgba(8, 145, 178, 0.2);
-            color: #67e8f9;
-            padding: 8px 10px;
-            border-radius: 4px;
-            display: block;
-            margin: 12px 0;
-            font-family: 'Courier New', monospace;
-            border: 1px solid rgba(103, 232, 249, 0.3);
-            font-size: 0.85em;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-        small {
-            color: rgba(207, 250, 254, 0.7);
-        }
-        strong {
-            color: #67e8f9;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ station_name }} - Funkstrom</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-        /* Audio Player Styles */
-        .audio-player {
-            background: rgba(12, 24, 33, 0.5);
-            padding: 20px;
-            border-radius: 8px;
-            margin: 20px 0;
-            border: 1px solid rgba(20, 184, 166, 0.3);
-        }
-        .player-controls {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        .play-button {
-            width: 40px;
-            height: 40px;
-            border-radius: 4px;
-            background: #0891b2;
-            border: 1px solid rgba(103, 232, 249, 0.3);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
-            flex-shrink: 0;
-        }
-        .play-button:hover {
-            background: #14b8a6;
-        }
-        .play-button:active {
-            transform: scale(0.95);
-        }
-        .play-icon {
-            width: 0;
-            height: 0;
-            border-style: solid;
-            border-width: 8px 0 8px 12px;
-            border-color: transparent transparent transparent #cffafe;
-            margin-left: 2px;
-        }
-        .pause-icon {
-            display: none;
-            gap: 4px;
-            align-items: center;
-            justify-content: center;
-        }
-        .pause-icon::before,
-        .pause-icon::after {
-            content: '';
-            width: 3px;
-            height: 14px;
-            background: #cffafe;
-            border-radius: 1px;
-        }
-        .playing .play-icon {
-            display: none;
-        }
-        .playing .pause-icon {
-            display: flex;
-        }
-        .volume-control {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .volume-label {
-            color: rgba(207, 250, 254, 0.7);
-            font-size: 0.85em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .volume-slider {
-            flex: 1;
-            height: 4px;
-            -webkit-appearance: none;
-            appearance: none;
-            background: rgba(103, 232, 249, 0.2);
-            border-radius: 2px;
-            outline: none;
-        }
-        .volume-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 12px;
-            height: 12px;
-            border-radius: 2px;
-            background: #0891b2;
-            cursor: pointer;
-        }
-        .volume-slider::-webkit-slider-thumb:hover {
-            background: #14b8a6;
-        }
-        .volume-slider::-moz-range-thumb {
-            width: 12px;
-            height: 12px;
-            border-radius: 2px;
-            background: #0891b2;
-            border: none;
-            cursor: pointer;
-        }
-        .volume-slider::-moz-range-thumb:hover {
-            background: #14b8a6;
-        }
+    :root {
+      --bg-deep: #0c1821;
+      --bg-elevated: #14222d;
+      --bg-surface: #1a2d3a;
+      --cyan-primary: #0891b2;
+      --blue-deep: #1e40af;
+      --teal-accent: #14b8a6;
+      --cyan-light: #67e8f9;
+      --text-primary: #cffafe;
+      --text-secondary: rgba(207,250,254,0.6);
+      --text-muted: rgba(207,250,254,0.4);
+      --border: rgba(207,250,254,0.08);
+      --border-accent: rgba(207,250,254,0.15);
+      --radius-none: 0;
+      --radius-sm: 2px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --sp-1: 4px;
+      --sp-2: 8px;
+      --sp-3: 12px;
+      --sp-4: 16px;
+      --sp-6: 24px;
+    }
 
-        /* Mobile optimizations */
-        @media screen and (max-width: 600px) {
-            body {
-                padding: 15px 10px;
-            }
-            .container {
-                padding: 20px 15px;
-            }
-            h1 {
-                font-size: 1.6em;
-                margin-bottom: 15px;
-            }
-            h2 {
-                font-size: 1.2em;
-            }
-            h3 {
-                font-size: 1em;
-            }
-            .stream-button {
-                display: block;
-                width: 100%;
-                text-align: center;
-                margin: 8px 0;
-                padding: 12px;
-            }
-            .endpoint-link {
-                display: block;
-                width: 100%;
-                text-align: center;
-                margin: 8px 0;
-                padding: 10px;
-            }
-            .now-playing {
-                padding: 15px 12px;
-                margin: 15px 0;
-            }
-            .track-info {
-                font-size: 1em;
-            }
-            .info {
-                padding: 12px;
-            }
-            code {
-                font-size: 0.75em;
-                padding: 6px 8px;
-            }
-            .audio-player {
-                padding: 15px 12px;
-            }
-            .player-controls {
-                gap: 10px;
-            }
-            .play-button {
-                width: 35px;
-                height: 35px;
-            }
-            .play-icon {
-                border-width: 6px 0 6px 10px;
-            }
-            .pause-icon {
-                gap: 3px;
-            }
-            .pause-icon::before,
-            .pause-icon::after {
-                width: 2px;
-                height: 10px;
-            }
-            .volume-label {
-                font-size: 0.75em;
-            }
-        }
-    </style>
+    html {
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    body {
+      min-height: 100vh;
+      padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Focus ── */
+    :focus-visible {
+      outline: 2px solid var(--cyan-primary);
+      outline-offset: 2px;
+    }
+
+    /* ── Live dot animation ── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--teal-accent);
+      animation: pulse 2s ease-in-out infinite;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+
+    /* ── Layout ── */
+    .page-wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: var(--sp-6) var(--sp-4);
+    }
+
+    /* ── Header ── */
+    header {
+      padding-bottom: var(--sp-6);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: var(--sp-6);
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      margin-bottom: var(--sp-2);
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--cyan-primary) 0%, var(--blue-deep) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .live-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-1);
+      padding: 2px var(--sp-2);
+      border: 1px solid var(--teal-accent);
+      border-radius: var(--radius-none);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--teal-accent);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .station-meta {
+      display: flex;
+      gap: var(--sp-4);
+      flex-wrap: wrap;
+    }
+
+    .meta-item {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .meta-item span {
+      color: var(--text-secondary);
+    }
+
+    /* ── Now Playing ── */
+    .now-playing {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-accent);
+      border-left: 3px solid var(--teal-accent);
+      border-radius: var(--radius-lg);
+      padding: var(--sp-4) var(--sp-6);
+      margin-bottom: var(--sp-6);
+    }
+
+    .now-playing-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--teal-accent);
+      font-weight: 500;
+      margin-bottom: var(--sp-3);
+    }
+
+    #track-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: var(--sp-1);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .track-secondary {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      display: flex;
+      gap: var(--sp-3);
+      flex-wrap: wrap;
+    }
+
+    /* ── Streams ── */
+    .section-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-bottom: var(--sp-3);
+    }
+
+    .streams-section {
+      margin-bottom: var(--sp-6);
+    }
+
+    .stream-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+    }
+
+    .stream-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: var(--sp-2) var(--sp-3);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      min-height: 44px;
+    }
+
+    .stream-btn:hover {
+      border-color: var(--border-accent);
+      color: var(--text-primary);
+    }
+
+    .stream-btn.active {
+      border-color: var(--teal-accent);
+      color: var(--teal-accent);
+    }
+
+    .bitrate-badge {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      padding: 1px var(--sp-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-none);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stream-btn.active .bitrate-badge {
+      border-color: rgba(20,184,166,0.4);
+      color: rgba(20,184,166,0.8);
+    }
+
+    /* ── How to Listen ── */
+    .how-to-listen {
+      margin-bottom: var(--sp-6);
+    }
+
+    .url-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+    }
+
+    .stream-url {
+      font-family: 'Courier New', 'Consolas', monospace;
+      font-size: 0.8rem;
+      color: var(--cyan-light);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: var(--sp-2) var(--sp-3);
+      overflow-x: auto;
+      white-space: nowrap;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .url-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: var(--sp-2);
+    }
+
+    /* ── Footer ── */
+    footer {
+      padding-top: var(--sp-4);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: var(--sp-4);
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .dev-link {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--sp-1) var(--sp-2);
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .dev-link:hover {
+      color: var(--text-secondary);
+      border-color: var(--border-accent);
+    }
+
+    /* ── Player Bar ── */
+    .player-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-accent);
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+      padding: 0 var(--sp-4);
+      padding-bottom: env(safe-area-inset-bottom);
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      z-index: 100;
+    }
+
+    .play-btn {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius-md);
+      background: var(--cyan-primary);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    .play-btn:hover {
+      background: var(--teal-accent);
+    }
+
+    .play-icon {
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 7px 0 7px 12px;
+      border-color: transparent transparent transparent var(--text-primary);
+      margin-left: 2px;
+    }
+
+    .pause-icon {
+      display: none;
+      gap: 3px;
+    }
+
+    .pause-icon::before,
+    .pause-icon::after {
+      content: '';
+      display: block;
+      width: 3px;
+      height: 14px;
+      background: var(--text-primary);
+      border-radius: 1px;
+    }
+
+    .play-btn.playing .play-icon { display: none; }
+    .play-btn.playing .pause-icon { display: flex; align-items: center; }
+
+    .player-info {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    #player-track {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .volume-wrap {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      flex-shrink: 0;
+      width: 120px;
+    }
+
+    .vol-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .volume-slider {
+      flex: 1;
+      height: 3px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--border-accent);
+      border-radius: var(--radius-sm);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: var(--radius-sm);
+      background: var(--cyan-primary);
+      cursor: pointer;
+    }
+
+    .volume-slider::-webkit-slider-thumb:hover {
+      background: var(--teal-accent);
+    }
+
+    .volume-slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: var(--radius-sm);
+      background: var(--cyan-primary);
+      border: none;
+      cursor: pointer;
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 640px) {
+      .page-wrap {
+        padding: var(--sp-4) var(--sp-3);
+      }
+
+      h1 {
+        font-size: 1.5rem;
+      }
+
+      .station-meta {
+        gap: var(--sp-2);
+      }
+
+      .stream-btn {
+        flex: 1 1 calc(50% - var(--sp-1));
+        justify-content: space-between;
+      }
+
+      .volume-wrap {
+        width: 90px;
+      }
+
+      .vol-label {
+        display: none;
+      }
+
+      footer {
+        gap: var(--sp-2);
+      }
+    }
+
+    @media (max-width: 375px) {
+      .stream-btn {
+        flex: 1 1 100%;
+      }
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
+  <audio id="radioStream" preload="none" aria-label="Radio stream">
+    <source src="/{{ first_stream }}" type="audio/mpeg">
+  </audio>
+
+  <div class="page-wrap">
+    <header>
+      <div class="header-top">
         <h1>{{ station_name }}</h1>
-        <div class="info">
-            <p><strong>Description:</strong> {{ station_description }}</p>
-            <p><strong>Genre:</strong> {{ station_genre }}</p>
-            <p><strong>Status:</strong> <span class="status">Online</span></p>
+        <span class="live-badge">
+          <span class="live-dot"></span>
+          Live
+        </span>
+      </div>
+      <div class="station-meta">
+        <div class="meta-item">Genre: <span>{{ station_genre }}</span></div>
+        <div class="meta-item">{{ station_description }}</div>
+      </div>
+    </header>
+
+    <main>
+      <section class="now-playing" aria-label="Now Playing">
+        <div class="now-playing-label">Now Playing</div>
+        <div id="track-title">{{ current_track }}</div>
+        <div class="track-secondary">
+          <span id="track-artist"></span>
+          <span id="track-album">{{ album }}</span>
         </div>
+      </section>
 
-        <div class="now-playing">
-            <h2>Now Playing</h2>
-            <div class="track-info">{{ current_track }}</div>
-            <div style="color: rgba(207, 250, 254, 0.7); margin-top: 5px;">Album: {{ album }}</div>
+      <section class="streams-section" aria-label="Available streams">
+        <div class="section-label">Streams</div>
+        <div class="stream-buttons">
+          {% for stream in streams %}
+          <button class="stream-btn" data-src="/{{ stream.name }}" data-name="{{ stream.name }}" type="button">
+            {{ stream.name }}
+            <span class="bitrate-badge">{{ stream.bitrate }}&nbsp;kbps</span>
+          </button>
+          {% endfor %}
         </div>
+      </section>
 
-        <h3>Available Streams:</h3>
-
-        <div style="margin: 15px 0;">
-        {% for stream in streams %}<button class="stream-button" data-stream="/{{ stream.name }}" data-stream-name="{{ stream.name }}">{{ stream.name }} - {{ stream.bitrate }} kbps</button>
-        {% endfor %}</div>
-
-        <!-- Audio Player -->
-        <div class="audio-player">
-            <audio id="radioStream" preload="none">
-                <source src="/{{ first_stream }}" type="audio/mpeg">
-                Your browser does not support the audio element.
-            </audio>
-
-            <div class="player-controls">
-                <button class="play-button" id="playButton" aria-label="Play/Pause">
-                    <div class="play-icon"></div>
-                    <div class="pause-icon"></div>
-                </button>
-
-                <div class="volume-control">
-                    <span class="volume-label">Volume:</span>
-                    <input type="range" class="volume-slider" id="volumeSlider"
-                           min="0" max="100" value="70" aria-label="Volume">
-                </div>
-            </div>
+      <section class="how-to-listen" aria-label="How to listen">
+        <div class="section-label">Direct URLs</div>
+        <div class="url-list">
+          {% for stream in streams %}
+          <div class="stream-url">{{ stream.url }}</div>
+          {% endfor %}
         </div>
+        <p class="url-hint">Compatible with VLC, Winamp, iTunes, and most media players. Station bitrate: <span>{{ bitrate }}&nbsp;kbps</span>. Host: <span>{{ bind_address }}:{{ port }}</span>.</p>
+      </section>
+    </main>
 
-        <div class="info">
-            <h3>How to listen:</h3>
-            <p>Copy one of these URLs into your favorite media player:</p>
-            {% for stream in streams %}<code>{{ stream.url }}</code>
-            {% endfor %}<p><small>Compatible with VLC, Winamp, iTunes, and most other media players.</small></p>
-        </div>
+    <footer>
+      <a href="/status" class="dev-link">Status JSON</a>
+      <a href="/current" class="dev-link">Current Track</a>
+      <a href="/api-docs" class="dev-link">API Docs</a>
+    </footer>
+  </div>
 
-        <h3>Developer Resources:</h3>
-        <a href="/status" class="endpoint-link">Status (JSON)</a>
-        <a href="/current" class="endpoint-link">Current Track (JSON)</a>
-        <a href="/api-docs" class="endpoint-link">API Documentation</a>
+  <!-- Sticky Player Bar -->
+  <div class="player-bar" role="region" aria-label="Audio player">
+    <button class="play-btn" id="playBtn" aria-label="Play" type="button">
+      <div class="play-icon"></div>
+      <div class="pause-icon"></div>
+    </button>
+
+    <div class="player-info">
+      <div id="player-track">{{ current_track }}</div>
     </div>
 
-    <script>
-        // Audio Player Controller
-        (function() {
-            const audio = document.getElementById('radioStream');
-            const playButton = document.getElementById('playButton');
-            const volumeSlider = document.getElementById('volumeSlider');
-            const streamButtons = document.querySelectorAll('.stream-button');
+    <div class="volume-wrap">
+      <span class="vol-label">Vol</span>
+      <input type="range" class="volume-slider" id="volumeSlider"
+             min="0" max="100" value="70" aria-label="Volume">
+    </div>
+  </div>
 
-            let isPlaying = false;
-            let currentStream = null;
+  <script>
+    (function () {
+      var audio = document.getElementById('radioStream');
+      var playBtn = document.getElementById('playBtn');
+      var volumeSlider = document.getElementById('volumeSlider');
+      var streamBtns = document.querySelectorAll('.stream-btn');
+      var playerTrack = document.getElementById('player-track');
+      var trackTitle = document.getElementById('track-title');
+      var trackArtist = document.getElementById('track-artist');
+      var trackAlbum = document.getElementById('track-album');
 
-            // Load saved volume from localStorage
-            const savedVolume = localStorage.getItem('radioVolume');
-            if (savedVolume !== null) {
-                volumeSlider.value = savedVolume;
-                audio.volume = savedVolume / 100;
-            } else {
-                audio.volume = 0.7; // Default 70%
-            }
+      var isPlaying = false;
+      var pollInterval = null;
 
-            // Stream button click handlers
-            streamButtons.forEach(button => {
-                button.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    const streamUrl = this.getAttribute('data-stream');
-                    const streamName = this.getAttribute('data-stream-name');
-                    switchStream(streamUrl, streamName, this);
-                });
-            });
+      // Volume restore
+      var savedVol = localStorage.getItem('radioVolume');
+      if (savedVol !== null) {
+        volumeSlider.value = savedVol;
+        audio.volume = savedVol / 100;
+      } else {
+        audio.volume = 0.7;
+      }
 
-            function switchStream(streamUrl, streamName, buttonElement) {
-                // Stop current playback
-                if (isPlaying) {
-                    pause();
-                }
+      // Play / Pause
+      function play() {
+        audio.play().then(function () {
+          isPlaying = true;
+          playBtn.classList.add('playing');
+          playBtn.setAttribute('aria-label', 'Pause');
+        }).catch(function (err) {
+          console.error('Playback error:', err);
+        });
+      }
 
-                // Update audio source
-                audio.src = streamUrl;
-                currentStream = streamName;
+      function pause() {
+        audio.pause();
+        audio.currentTime = 0;
+        isPlaying = false;
+        playBtn.classList.remove('playing');
+        playBtn.setAttribute('aria-label', 'Play');
+      }
 
-                // Update active button state
-                streamButtons.forEach(btn => btn.classList.remove('active'));
-                buttonElement.classList.add('active');
+      playBtn.addEventListener('click', function () {
+        if (isPlaying) { pause(); } else { play(); }
+      });
 
-                // Start playing new stream
-                play();
-            }
+      // Stream switching
+      streamBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var src = this.getAttribute('data-src');
+          if (isPlaying) { pause(); }
+          audio.src = src;
+          streamBtns.forEach(function (b) { b.classList.remove('active'); });
+          this.classList.add('active');
+          play();
+        });
+      });
 
-            // Play/Pause functionality
-            playButton.addEventListener('click', function() {
-                if (isPlaying) {
-                    pause();
-                } else {
-                    play();
-                }
-            });
+      // Volume
+      volumeSlider.addEventListener('input', function () {
+        audio.volume = this.value / 100;
+        localStorage.setItem('radioVolume', this.value);
+      });
 
-            function play() {
-                audio.play().then(() => {
-                    isPlaying = true;
-                    playButton.classList.add('playing');
-                }).catch(error => {
-                    console.error('Playback error:', error);
-                    isPlaying = false;
-                    playButton.classList.remove('playing');
-                });
-            }
+      // Audio errors
+      audio.addEventListener('error', function (e) {
+        console.error('Stream error:', e);
+        isPlaying = false;
+        playBtn.classList.remove('playing');
+        playBtn.setAttribute('aria-label', 'Play');
+      });
 
-            function pause() {
-                audio.pause();
-                audio.currentTime = 0; // Reset for streams
-                isPlaying = false;
-                playButton.classList.remove('playing');
-            }
+      // Keyboard spacebar
+      document.addEventListener('keydown', function (e) {
+        if (e.code === 'Space' && e.target === document.body) {
+          e.preventDefault();
+          playBtn.click();
+        }
+      });
 
-            // Volume control
-            volumeSlider.addEventListener('input', function() {
-                const volume = this.value / 100;
-                audio.volume = volume;
-                localStorage.setItem('radioVolume', this.value);
-            });
+      // Now-playing polling
+      function poll() {
+        fetch('/current')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            var title = data.title || '';
+            var artist = data.artist || '';
+            var album = data.album || '';
+            trackTitle.textContent = title || trackTitle.textContent;
+            trackArtist.textContent = artist;
+            trackAlbum.textContent = album;
+            playerTrack.textContent = (artist ? artist + ' - ' : '') + title;
+          })
+          .catch(function (e) { console.error('Poll error:', e); });
+      }
 
-            // Audio event listeners
-            audio.addEventListener('error', function(e) {
-                console.error('Stream error:', e);
-                isPlaying = false;
-                playButton.classList.remove('playing');
-            });
+      function startPolling() {
+        if (pollInterval) { return; }
+        pollInterval = setInterval(poll, 5000);
+      }
 
-            // Keyboard support
-            document.addEventListener('keydown', function(e) {
-                if (e.code === 'Space' && e.target === document.body) {
-                    e.preventDefault();
-                    playButton.click();
-                }
-            });
-        })();
-    </script>
+      function stopPolling() {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) { stopPolling(); } else { startPolling(); }
+      });
+
+      startPolling();
+    })();
+  </script>
 </body>
 </html>
