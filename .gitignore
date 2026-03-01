@@ -4,3 +4,4 @@
 /data
 config.toml
 *_test_*.toml
+.sisyphus/
