@@ -34,6 +34,7 @@ Docker Example:
 ```bash
 docker run -p 8284:8284 \
         -v /path/to/music:/music:ro \
+        # -v /path/to/config.toml:/config.toml:ro \  # Optional: override default config
         rouhim/funkstrom
 ```
 
@@ -45,6 +46,7 @@ services:
     image: rouhim/funkstrom
     volumes:
       - /path/to/music:/music:ro
+      # - /path/to/config.toml:/config.toml:ro  # Optional: override default config
     ports:
       - "8284:8284"
     environment:
