@@ -78,12 +78,22 @@ jobs:
           curl -fsS http://127.0.0.1:3002/status || true
           exit 1
 
+      - name: Prime stream endpoint
+        run: |
+          timeout 60 curl -s -N http://127.0.0.1:3002/stream > /dev/null 2>&1 &
+          echo "STREAM_PRIMER_PID=$!" >> $GITHUB_ENV
+          sleep 2
+
       - name: Run E2E tests
         run: ./e2e/test.sh
 
       - name: Stop server
         if: always()
-        run: pkill funkstrom || true
+        run: |
+          if [ -n "${STREAM_PRIMER_PID}" ]; then
+            kill "${STREAM_PRIMER_PID}" || true
+          fi
+          pkill funkstrom || true
 
   create-release:
     needs: [lint-format, rust-tests, e2e-tests]
