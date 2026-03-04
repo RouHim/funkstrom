@@ -1,0 +1,13 @@
+test_music/
+test_playlists/
+e2e/
+target/
+.git/
+.github/
+.idea/
+.sisyphus/
+*.md
+config.toml
+data/
+docs/
+openapi.yaml
