@@ -1,0 +1,204 @@
+name: CI/CD
+
+on:
+  push:
+  pull_request:
+    types:
+      - opened
+  workflow_dispatch:
+
+jobs:
+  lint-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy lints
+        run: cargo clippy -- -D warnings
+
+  rust-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Run tests
+        run: cargo test
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Start server
+        run: nohup ./target/release/funkstrom --config e2e/ci-config.toml &
+
+      - name: Wait for server
+        run: sleep 5
+
+      - name: Run E2E tests
+        run: ./e2e/test.sh
+
+      - name: Stop server
+        if: always()
+        run: pkill funkstrom || true
+
+  create-release:
+    needs: [lint-format, rust-tests, e2e-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        if: github.ref == 'refs/heads/main'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        if: github.ref == 'refs/heads/main'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install semantic-release
+        if: github.ref == 'refs/heads/main'
+        run: |
+          npm install -g \
+            semantic-release \
+            @semantic-release/git \
+            @semantic-release/changelog \
+            @semantic-release/exec \
+            @semantic-release/commit-analyzer \
+            conventional-changelog-conventionalcommits
+
+      - name: Run semantic-release
+        if: github.ref == 'refs/heads/main'
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-binaries:
+    needs: [create-release]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            image: ghcr.io/rust-cross/rust-musl-cross:x86_64-musl
+            name: funkstrom-x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+            image: ghcr.io/rust-cross/rust-musl-cross:aarch64-musl
+            name: funkstrom-aarch64-unknown-linux-musl
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        run: cp target/${{ matrix.target }}/release/funkstrom ${{ matrix.name }}
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          TAG=$(git ls-remote --tags --sort=-v:refname origin 'v*' | head -n1 | sed 's/.*refs\/tags\///')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          files: ${{ matrix.name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-container:
+    needs: [lint-format, rust-tests, e2e-tests]
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | podman login docker.io -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build container image
+        run: |
+          podman build \
+            --platform ${{ matrix.platform }} \
+            --build-arg TARGETARCH=${{ matrix.arch }} \
+            --tag funkstrom-${{ matrix.arch }}:latest \
+            -f Containerfile .
+
+      - name: Test container startup
+        if: matrix.arch == 'amd64'
+        run: |
+          podman run -d --name funkstrom-test -p 8284:8284 funkstrom-amd64:latest
+          sleep 5
+          curl -f http://localhost:8284/status || (podman logs funkstrom-test && exit 1)
+          podman stop funkstrom-test
+          podman rm funkstrom-test
+
+      - name: Push image
+        run: podman push funkstrom-${{ matrix.arch }}:latest docker.io/rouhim/funkstrom:${{ matrix.arch }}-latest
+
+  push-manifest:
+    needs: [build-container]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker buildx imagetools create -t docker.io/rouhim/funkstrom:latest \
+            docker.io/rouhim/funkstrom:amd64-latest \
+            docker.io/rouhim/funkstrom:arm64-latest
