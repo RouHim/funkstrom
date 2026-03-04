@@ -60,8 +60,23 @@ jobs:
       - name: Start server
         run: nohup ./target/release/funkstrom --config e2e/ci-config.toml &
 
-      - name: Wait for server
-        run: sleep 5
+      - name: Wait for server readiness
+        run: |
+          for i in {1..45}; do
+            STATUS=$(curl -fsS http://127.0.0.1:3002/status | jq -r '.streams[0].status // empty' || true)
+            BUFFER_CHUNKS=$(curl -fsS http://127.0.0.1:3002/status | jq -r '.streams[0].buffer_chunks // 0' || echo 0)
+
+            if [ "$STATUS" = "online" ] && [ "$BUFFER_CHUNKS" -gt 0 ]; then
+              echo "Server ready after ${i}s (status=${STATUS}, buffer_chunks=${BUFFER_CHUNKS})"
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          echo "Server did not become ready in time"
+          curl -fsS http://127.0.0.1:3002/status || true
+          exit 1
 
       - name: Run E2E tests
         run: ./e2e/test.sh
