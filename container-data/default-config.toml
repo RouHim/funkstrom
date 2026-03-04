@@ -1,0 +1,25 @@
+# Funkstrom Docker Default Configuration
+# Override by mounting your own config: -v /path/to/config.toml:/config.toml:ro
+
+[server]
+port = 8284
+bind_address = "0.0.0.0"
+ffmpeg_path = "/ffmpeg"
+
+[library]
+music_directory = "/music"
+shuffle = true
+repeat = true
+
+[stream.stream]
+bitrate = 128
+format = "mp3"
+sample_rate = 44100
+channels = 2
+enabled = true
+
+[station]
+station_name = "Funkstrom Radio"
+description = "Powered by Funkstrom"
+genre = "Various"
+url = "http://localhost:8284"
