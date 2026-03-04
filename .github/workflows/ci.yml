@@ -5,6 +5,8 @@ on:
   pull_request:
     types:
       - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
 
 jobs:
@@ -186,6 +188,7 @@ jobs:
 
   push-manifest:
     needs: [build-container]
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Setup Docker Buildx
