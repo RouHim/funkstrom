@@ -27,7 +27,7 @@ fi
 
 # Test 2: Status shows server is online
 echo "Test 2: Server status is online"
-STATUS=$(curl -s "${BASE_URL}/status" | jq -r '.status')
+STATUS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].status')
 if [ "$STATUS" = "online" ]; then
     echo "  ✓ PASS"
     ((PASS++))
@@ -38,7 +38,7 @@ fi
 
 # Test 3: Buffer has data
 echo "Test 3: Buffer has data"
-BUFFER_CHUNKS=$(curl -s "${BASE_URL}/status" | jq -r '.buffer_chunks')
+BUFFER_CHUNKS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].buffer_chunks')
 if [ "$BUFFER_CHUNKS" -gt 0 ]; then
     echo "  ✓ PASS (${BUFFER_CHUNKS} chunks)"
     ((PASS++))
