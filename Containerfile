@@ -1,22 +1,4 @@
 # # # # # # # # # # # # # # # # # # # #
-# FFmpeg Downloader
-# # # # # # # # # # # # # # # # # # # #
-FROM alpine AS ffmpeg-downloader
-
-ARG TARGETARCH
-
-# Download and extract static ffmpeg build for the target architecture
-RUN apk add --no-cache curl tar xz && \
-    if [ "$TARGETARCH" = "arm64" ]; then \
-        FFMPEG_ARCH="arm64"; \
-    else \
-        FFMPEG_ARCH="amd64"; \
-    fi && \
-    curl -L -o /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz" && \
-    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp --wildcards '*/ffmpeg' --strip-components=1 && \
-    chmod +x /tmp/ffmpeg
-
-# # # # # # # # # # # # # # # # # # # #
 # Application Builder
 # # # # # # # # # # # # # # # # # # # #
 FROM ghcr.io/rust-cross/rust-musl-cross:x86_64-musl AS builder
@@ -38,12 +20,14 @@ RUN find /app/target -name "funkstrom" -type f -executable | head -1 | xargs -I{
 # # # # # # # # # # # # # # # # # # # #
 # Runtime
 # # # # # # # # # # # # # # # # # # # #
-FROM scratch
+FROM alpine
 
-WORKDIR /
+RUN apk add --no-cache ffmpeg && \
+    ln -s /usr/bin/ffmpeg /ffmpeg && \
+    mkdir -p /app /music && \
+    chown -R 1000:1000 /app /music
 
-# Copy ffmpeg static binary
-COPY --chmod=755 --from=ffmpeg-downloader /tmp/ffmpeg /ffmpeg
+WORKDIR /app
 
 # Copy the compiled application binary
 COPY --chmod=755 --from=builder /app/funkstrom-binary /funkstrom

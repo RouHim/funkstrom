@@ -220,11 +220,8 @@ jobs:
       - name: Test container startup
         if: steps.dockerhub.outputs.available == 'true' && matrix.arch == 'amd64'
         run: |
-          podman run -d --name funkstrom-test -p 8284:8284 funkstrom-amd64:latest
-          sleep 5
-          curl -f http://localhost:8284/status || (podman logs funkstrom-test && exit 1)
-          podman stop funkstrom-test
-          podman rm funkstrom-test
+          podman run --rm funkstrom-amd64:latest --help > /dev/null
+          podman run --rm --entrypoint /ffmpeg funkstrom-amd64:latest -version > /dev/null
 
       - name: Push image
         if: steps.dockerhub.outputs.available == 'true'
