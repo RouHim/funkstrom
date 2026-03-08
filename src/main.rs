@@ -282,7 +282,7 @@ fn start_server(
 ) -> JoinHandle<()> {
     let server = IcecastServer::new(
         stream_buffers,
-        config.station.station_name.clone(),
+        config.station.name.clone(),
         config.station.description.clone(),
         config.station.genre.clone(),
         current_metadata,
@@ -381,7 +381,7 @@ fn log_startup_info(config: &Config) {
         config.server.port
     );
     log::info!("Music directory: {}", config.library.music_directory);
-    log::info!("Station: {}", config.station.station_name);
+    log::info!("Station: {}", config.station.name);
 }
 
 fn log_server_urls(config: &Config) {

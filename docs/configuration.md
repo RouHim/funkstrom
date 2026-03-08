@@ -35,7 +35,7 @@ shuffle = true
 repeat = true
 
 [station]
-station_name = "My Radio"
+name = "My Radio"
 description = "My personal radio station"
 genre = "Various"
 url = "http://localhost:8284"
@@ -182,14 +182,14 @@ The `[station]` section provides metadata about your radio station that is sent 
 
 | Option         | Type   | Required | Default | Description          |
 |----------------|--------|----------|---------|----------------------|
-| `station_name` | string | Yes      | -       | Station display name |
+| `name`         | string | Yes      | -       | Station display name |
 | `description`  | string | Yes      | -       | Station description  |
 | `genre`        | string | Yes      | -       | Music genre category |
 | `url`          | string | Yes      | -       | Station website URL  |
 
 ### Details
 
-#### `station_name`
+#### `name`
 
 The name of your radio station, displayed in audio players and the info page.
 
@@ -223,7 +223,7 @@ The web URL where listeners can find more information about your station.
 
 ```toml
 [station]
-station_name = "Deep Sea Radio"
+name = "Deep Sea Radio"
 description = "Oceanic electronic beats"
 genre = "Electronic"
 url = "http://localhost:8284"
@@ -964,7 +964,7 @@ shuffle = true
 repeat = true
 
 [station]
-station_name = "My Radio"
+name = "My Radio"
 description = "Personal radio station"
 genre = "Various"
 url = "http://localhost:8284"
@@ -993,7 +993,7 @@ shuffle = true
 repeat = true
 
 [station]
-station_name = "Deep Sea Radio"
+name = "Deep Sea Radio"
 description = "Electronic music from the depths"
 genre = "Electronic"
 url = "https://radio.example.com"
@@ -1039,7 +1039,7 @@ shuffle = true
 repeat = true
 
 [station]
-station_name = "Deep Sea Radio"
+name = "Deep Sea Radio"
 description = "Electronic music and curated shows"
 genre = "Electronic"
 url = "https://radio.example.com"

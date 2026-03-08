@@ -32,7 +32,7 @@ repeat = true
 # ============================================================================
 [station]
 # Station name displayed to listeners
-station_name = "My Radio Station"
+name = "My Radio Station"
 
 # Station description
 description = "Great music 24/7"

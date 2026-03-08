@@ -15,7 +15,7 @@ channels = 2
 enabled = true
 
 [station]
-station_name = "Funkstrom CI Test"
+name = "Funkstrom CI Test"
 description = "E2E Test Station"
 genre = "Test"
 url = "http://localhost:3002"

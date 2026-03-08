@@ -19,7 +19,7 @@ channels = 2
 enabled = true
 
 [station]
-station_name = "Funkstrom Radio"
+name = "Funkstrom Radio"
 description = "Powered by Funkstrom"
 genre = "Various"
 url = "http://localhost:8284"

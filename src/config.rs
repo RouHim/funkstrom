@@ -28,7 +28,7 @@ pub struct LibraryConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct StationConfig {
-    pub station_name: String,
+    pub name: String,
     pub description: String,
     pub genre: String,
     pub url: String,
@@ -219,7 +219,7 @@ impl Default for Config {
                 repeat: true,
             },
             station: StationConfig {
-                station_name: "My Radio Station".to_string(),
+                name: "My Radio Station".to_string(),
                 description: "Great music 24/7".to_string(),
                 genre: "Various".to_string(),
                 url: "http://localhost:8000".to_string(),
@@ -373,7 +373,7 @@ shuffle = true
 repeat = true
 
 [station]
-station_name = "Test Radio"
+name = "Test Radio"
 description = "Test Description"
 genre = "Test"
 url = "http://test.local"
@@ -419,7 +419,7 @@ shuffle = true
 repeat = true
 
 [station]
-station_name = "Test Radio"
+name = "Test Radio"
 description = "Test Description"
 genre = "Test"
 url = "http://test.local"
