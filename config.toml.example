@@ -40,9 +40,6 @@ description = "Great music 24/7"
 # Music genre
 genre = "Various"
 
-# Station website URL
-url = "http://localhost:8284"
-
 # ============================================================================
 # Stream Configuration (Multi-Stream Support)
 # ============================================================================

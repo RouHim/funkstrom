@@ -31,7 +31,6 @@ pub struct StationConfig {
     pub name: String,
     pub description: String,
     pub genre: String,
-    pub url: String,
 }
 
 /// Configuration for an individual audio stream.
@@ -222,7 +221,6 @@ impl Default for Config {
                 name: "My Radio Station".to_string(),
                 description: "Great music 24/7".to_string(),
                 genre: "Various".to_string(),
-                url: "http://localhost:8000".to_string(),
             },
             stream: streams,
             schedule: None,
@@ -376,7 +374,6 @@ repeat = true
 name = "Test Radio"
 description = "Test Description"
 genre = "Test"
-url = "http://test.local"
 
 [stream.high]
 bitrate = 320
@@ -422,7 +419,6 @@ repeat = true
 name = "Test Radio"
 description = "Test Description"
 genre = "Test"
-url = "http://test.local"
 
 [stream.invalid@name]
 bitrate = 128
