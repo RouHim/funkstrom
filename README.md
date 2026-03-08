@@ -34,7 +34,7 @@ Docker Example:
 ```bash
 docker run -p 8284:8284 \
         -v /path/to/music:/music:ro \
-        # -v /path/to/config.toml:/config.toml:ro \  # Optional: override default config
+        -v /path/to/config.toml:/config.toml:ro \  # Optional: override default config
         ghcr.io/rouhim/funkstrom
 ```
 
@@ -46,7 +46,7 @@ services:
     image: ghcr.io/rouhim/funkstrom
     volumes:
       - /path/to/music:/music:ro
-      # - /path/to/config.toml:/config.toml:ro  # Optional: override default config
+      - /path/to/config.toml:/config.toml:ro  # Optional: override default config
     ports:
       - "8284:8284"
     environment:
@@ -98,6 +98,7 @@ format = "mp3"
 sample_rate = 44100
 channels = 2
 enabled = true
+
 [station]
 name = "My Radio Station"
 description = "Great music 24/7"
