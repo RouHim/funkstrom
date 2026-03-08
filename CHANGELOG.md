@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/RouHim/funkstrom/compare/1.0.1...1.0.2) (2026-03-08)
+
+
+### Bug Fixes
+
+* **ci:** make container publish resilient and deterministic ([56ceb91](https://github.com/RouHim/funkstrom/commit/56ceb91d6b216f65e53fd97260ee4806f6603778))
+
 ## [1.0.1](https://github.com/RouHim/funkstrom/compare/1.0.0...1.0.1) (2026-03-08)
 
 
