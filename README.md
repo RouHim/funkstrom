@@ -35,7 +35,7 @@ Docker Example:
 docker run -p 8284:8284 \
         -v /path/to/music:/music:ro \
         # -v /path/to/config.toml:/config.toml:ro \  # Optional: override default config
-        rouhim/funkstrom
+        ghcr.io/rouhim/funkstrom
 ```
 
 Docker compose example:
@@ -43,7 +43,7 @@ Docker compose example:
 ```yaml
 services:
   funkstrom:
-    image: rouhim/funkstrom
+    image: ghcr.io/rouhim/funkstrom
     volumes:
       - /path/to/music:/music:ro
       # - /path/to/config.toml:/config.toml:ro  # Optional: override default config
