@@ -206,26 +206,31 @@ jobs:
 
       - name: Login to Docker Hub
         if: steps.dockerhub.outputs.available == 'true'
-        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | podman login docker.io -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Setup Docker Buildx
+        if: steps.dockerhub.outputs.available == 'true'
+        uses: docker/setup-buildx-action@v3
 
       - name: Build container image
         if: steps.dockerhub.outputs.available == 'true'
         run: |
-          podman build \
+          docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg TARGETARCH=${{ matrix.arch }} \
-            --tag funkstrom-${{ matrix.arch }}:latest \
+            --tag docker.io/rouhim/funkstrom:${{ matrix.arch }}-latest \
+            --push \
             -f Containerfile .
 
       - name: Test container startup
         if: steps.dockerhub.outputs.available == 'true' && matrix.arch == 'amd64'
         run: |
-          podman run --rm funkstrom-amd64:latest --help > /dev/null
-          podman run --rm --entrypoint /ffmpeg funkstrom-amd64:latest -version > /dev/null
-
-      - name: Push image
-        if: steps.dockerhub.outputs.available == 'true'
-        run: podman push funkstrom-${{ matrix.arch }}:latest docker.io/rouhim/funkstrom:${{ matrix.arch }}-latest
+          docker pull docker.io/rouhim/funkstrom:amd64-latest
+          docker run --rm docker.io/rouhim/funkstrom:amd64-latest --help > /dev/null
+          docker run --rm --entrypoint /ffmpeg docker.io/rouhim/funkstrom:amd64-latest -version > /dev/null
 
   push-manifest:
     needs: [build-container]
