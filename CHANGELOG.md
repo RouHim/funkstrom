@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/RouHim/funkstrom/compare/1.0.4...1.0.5) (2026-03-08)
+
+
+### Bug Fixes
+
+* remove unused url field from StationConfig ([58655b4](https://github.com/RouHim/funkstrom/commit/58655b49d803ddb661245c86a756678543b9704b))
+
 ## [1.0.4](https://github.com/RouHim/funkstrom/compare/1.0.3...1.0.4) (2026-03-08)
 
 
