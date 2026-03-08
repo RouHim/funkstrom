@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/RouHim/funkstrom/compare/1.0.2...1.0.3) (2026-03-08)
+
+
+### Bug Fixes
+
+* **ci:** use docker buildx for image publish ([e917daa](https://github.com/RouHim/funkstrom/commit/e917daa595035c48ae627132b3161dc9edd607cf))
+
 ## [1.0.2](https://github.com/RouHim/funkstrom/compare/1.0.1...1.0.2) (2026-03-08)
 
 
