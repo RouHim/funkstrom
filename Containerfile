@@ -1,9 +1,33 @@
 # # # # # # # # # # # # # # # # # # # #
+# FFmpeg Downloader
+# # # # # # # # # # # # # # # # # # # #
+FROM alpine:latest AS ffmpeg-downloader
+
+ARG TARGETARCH
+
+# Download and extract static ffmpeg build for the target architecture
+RUN apk add --no-cache curl tar xz && \
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        FFMPEG_ARCH="arm64"; \
+    else \
+        FFMPEG_ARCH="amd64"; \
+    fi && \
+    curl -L -o ffmpeg-release.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz && \
+    tar xf ffmpeg-release.tar.xz && \
+    mv ffmpeg-*-${FFMPEG_ARCH}-static/ffmpeg /ffmpeg && \
+    chmod +x /ffmpeg && \
+    rm -rf ffmpeg-* ffmpeg-release.tar.xz
+
+# # # # # # # # # # # # # # # # # # # #
 # Application Builder
 # # # # # # # # # # # # # # # # # # # #
-FROM ghcr.io/rust-cross/rust-musl-cross:x86_64-musl AS builder
+FROM ghcr.io/rust-cross/rust-musl-cross:x86_64-musl AS builder-amd64
+FROM ghcr.io/rust-cross/rust-musl-cross:aarch64-musl AS builder-arm64
+FROM builder-${TARGETARCH:-amd64} AS builder
 
+# Set working directory and create empty directory in one layer
 WORKDIR /app
+RUN mkdir "/empty_dir"
 
 # Copy source code
 COPY Cargo.toml Cargo.lock ./
@@ -11,35 +35,49 @@ COPY openapi.yaml ./
 COPY src/ src/
 COPY templates/ templates/
 
-# Build the application
-RUN cargo build --release
+# Determine the Rust target triple based on architecture
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "aarch64-unknown-linux-musl" > /tmp/rust-target; \
+    else \
+        echo "x86_64-unknown-linux-musl" > /tmp/rust-target; \
+    fi
 
-# Copy the binary to a known location for the final stage
-RUN find /app/target -name "funkstrom" -type f -executable | head -1 | xargs -I{} cp {} /app/funkstrom-binary
+# Build application with musl compatibility
+RUN RUST_TARGET=$(cat /tmp/rust-target) && \
+    cargo build --profile production --target ${RUST_TARGET}
 
 # # # # # # # # # # # # # # # # # # # #
 # Runtime
 # # # # # # # # # # # # # # # # # # # #
-FROM alpine
+FROM scratch
 
-RUN apk add --no-cache ffmpeg && \
-    ln -s /usr/bin/ffmpeg /ffmpeg && \
-    mkdir -p /app /music && \
-    chown -R 1000:1000 /app /music
+ARG TARGETARCH
+
+# Set environment variables in one layer
+ENV USER="1000" \
+    RUST_LOG="info" \
+    FFMPEG_PATH="/ffmpeg"
+
+# Copy the empty directories as writable locations
+COPY --chmod=777 --chown=$USER:$USER --from=builder /empty_dir /app
+COPY --chmod=777 --chown=$USER:$USER --from=builder /empty_dir /tmp
+COPY --chmod=777 --chown=$USER:$USER --from=builder /empty_dir /music
+
+# Copy the built application directly from target directory
+# Use wildcard to handle architecture-specific path
+COPY --chmod=755 --chown=$USER:$USER --from=builder /app/target/*/production/funkstrom /funkstrom
+
+# Copy ffmpeg static binary
+COPY --chmod=755 --chown=$USER:$USER --from=ffmpeg-downloader /ffmpeg /ffmpeg
+
+# Copy baked-in default configuration
+COPY --chmod=644 container-data/default-config.toml /config.toml
 
 WORKDIR /app
 
-# Copy the compiled application binary
-COPY --chmod=755 --from=builder /app/funkstrom-binary /funkstrom
-
-# Copy templates for runtime rendering
-COPY --chmod=644 --from=builder /app/templates/ /templates/
-
-# Copy baked-in default configuration
-COPY container-data/default-config.toml /config.toml
-
 EXPOSE 8284
 
-USER 1000
+USER $USER
 
 ENTRYPOINT ["/funkstrom", "--config", "/config.toml"]
