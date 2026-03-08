@@ -12,6 +12,7 @@ on:
 permissions:
   contents: write
   issues: write
+  packages: write
   pull-requests: write
 
 jobs:
@@ -194,73 +195,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check Docker Hub credentials
-        id: dockerhub
-        run: |
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "Docker Hub credentials are not configured; skipping image publish"
-          fi
+      - name: Prepare registry namespace
+        id: registry
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Login to Docker Hub
-        if: steps.dockerhub.outputs.available == 'true'
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Docker Buildx
-        if: steps.dockerhub.outputs.available == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Build container image
-        if: steps.dockerhub.outputs.available == 'true'
         run: |
           docker buildx build \
             --platform ${{ matrix.platform }} \
             --build-arg TARGETARCH=${{ matrix.arch }} \
-            --tag docker.io/rouhim/funkstrom:${{ matrix.arch }}-latest \
+            --tag ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:${{ matrix.arch }}-latest \
             --push \
             -f Containerfile .
 
       - name: Test container startup
-        if: steps.dockerhub.outputs.available == 'true' && matrix.arch == 'amd64'
+        if: matrix.arch == 'amd64'
         run: |
-          docker pull docker.io/rouhim/funkstrom:amd64-latest
-          docker run --rm docker.io/rouhim/funkstrom:amd64-latest --help > /dev/null
-          docker run --rm --entrypoint /ffmpeg docker.io/rouhim/funkstrom:amd64-latest -version > /dev/null
+          docker pull ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:amd64-latest
+          docker run --rm ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:amd64-latest --help > /dev/null
+          docker run --rm --entrypoint /ffmpeg ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:amd64-latest -version > /dev/null
 
   push-manifest:
     needs: [build-container]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Check Docker Hub credentials
-        id: dockerhub
-        run: |
-          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "Docker Hub credentials are not configured; skipping manifest publish"
-          fi
+      - name: Prepare registry namespace
+        id: registry
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Docker Buildx
-        if: steps.dockerhub.outputs.available == 'true'
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        if: steps.dockerhub.outputs.available == 'true'
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push manifest
-        if: steps.dockerhub.outputs.available == 'true'
         run: |
-          docker buildx imagetools create -t docker.io/rouhim/funkstrom:latest \
-            docker.io/rouhim/funkstrom:amd64-latest \
-            docker.io/rouhim/funkstrom:arm64-latest
+          docker buildx imagetools create -t ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:latest \
+            ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:amd64-latest \
+            ghcr.io/${{ steps.registry.outputs.owner }}/funkstrom:arm64-latest
