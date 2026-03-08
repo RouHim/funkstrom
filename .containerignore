@@ -10,4 +10,3 @@ target/
 config.toml
 data/
 docs/
-openapi.yaml

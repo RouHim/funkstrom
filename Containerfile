@@ -19,13 +19,13 @@ RUN apk add --no-cache curl tar xz && \
 # # # # # # # # # # # # # # # # # # # #
 # Application Builder
 # # # # # # # # # # # # # # # # # # # #
-ARG RUST_MUSL_IMAGE=ghcr.io/rust-cross/rust-musl-cross:x86_64-musl
-FROM ${RUST_MUSL_IMAGE} AS builder
+FROM ghcr.io/rust-cross/rust-musl-cross:x86_64-musl AS builder
 
 WORKDIR /app
 
 # Copy source code
 COPY Cargo.toml Cargo.lock ./
+COPY openapi.yaml ./
 COPY src/ src/
 COPY templates/ templates/
 
