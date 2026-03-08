@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/RouHim/funkstrom/compare/1.0.3...1.0.4) (2026-03-08)
+
+
+### Bug Fixes
+
+* **ci:** publish container images to ghcr ([2b49dd0](https://github.com/RouHim/funkstrom/commit/2b49dd0617bf269674c044e29f5d1eb8071d3b67))
+
 ## [1.0.3](https://github.com/RouHim/funkstrom/compare/1.0.2...1.0.3) (2026-03-08)
 
 
