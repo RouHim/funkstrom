@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/RouHim/funkstrom/compare/1.0.5...1.0.6) (2026-03-08)
+
+
+### Bug Fixes
+
+* harden ffmpeg path resolution for container runtime ([58040cd](https://github.com/RouHim/funkstrom/commit/58040cd3723aa927b64515b127abb19c324f2e7e))
+
 ## [1.0.5](https://github.com/RouHim/funkstrom/compare/1.0.4...1.0.5) (2026-03-08)
 
 
