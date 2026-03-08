@@ -29,7 +29,7 @@ Funkstrom reads audio files from your configured music directory, transcodes the
 
 ### Docker
 
-Docker Example:
+Docker run example:
 
 ```bash
 docker run -p 8284:8284 \
@@ -42,7 +42,7 @@ docker run -p 8284:8284 \
 > [!TIP]
 > Mounting the `/app/data` directory is optional but highly recommended. It stores the SQLite database that indexes your music library. Without it, the server will perform a full library scan every time the container restarts, which can take several minutes for large libraries.
 
-Docker compose example:
+Docker Compose example using bind mounts:
 
 ```yaml
 services:
@@ -56,6 +56,27 @@ services:
       - "8284:8284"
     environment:
       - RUST_LOG=info
+    restart: unless-stopped
+```
+
+Docker Compose example using named volumes:
+
+```yaml
+services:
+  funkstrom:
+    image: ghcr.io/rouhim/funkstrom
+    volumes:
+      - /path/to/music:/music:ro
+      - /path/to/config.toml:/config.toml:ro
+      - funkstrom-data:/app/data
+    ports:
+      - "8284:8284"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+
+volumes:
+  funkstrom-data:
 ```
 
 ### Native execution

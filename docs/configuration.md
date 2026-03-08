@@ -850,25 +850,110 @@ RUST_LOG=info cargo run -- --config config.toml
 
 ### Docker Usage
 
-When running Funkstrom in a container, it's important to mount the `/app/data/` directory to a persistent volume. This ensures that the music library index is preserved across container restarts.
+When running Funkstrom in a container, the `/app/data/` directory stores the SQLite database that indexes your music library. Mounting this directory to a persistent volume ensures the index is preserved across container restarts.
+
+Without a persistent `/app/data/` mount, Funkstrom will perform a full library scan every time the container starts, which can take several minutes for large music collections.
+
+#### What's Stored in `/app/data/`
+
+| File | Purpose |
+|------|---------|
+| `database.db` | SQLite database with track metadata, file paths, shuffle state, and scan timestamps |
 
 #### Docker Run
 
+**Minimal (with data persistence):**
+
 ```bash
-docker run -v /path/to/data:/app/data ghcr.io/rouhim/funkstrom
+docker run -p 8284:8284 \
+        -v /path/to/music:/music:ro \
+        -v /path/to/data:/app/data \
+        ghcr.io/rouhim/funkstrom
+```
+
+**With custom config:**
+
+```bash
+docker run -p 8284:8284 \
+        -v /path/to/music:/music:ro \
+        -v /path/to/config.toml:/config.toml:ro \
+        -v /path/to/data:/app/data \
+        -e RUST_LOG=info \
+        ghcr.io/rouhim/funkstrom
 ```
 
 #### Docker Compose
+
+**Using bind mounts:**
 
 ```yaml
 services:
   funkstrom:
     image: ghcr.io/rouhim/funkstrom
     volumes:
+      - /path/to/music:/music:ro
+      - /path/to/config.toml:/config.toml:ro
       - /path/to/data:/app/data
+    ports:
+      - "8284:8284"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
 ```
 
-Without this volume mount, Funkstrom will perform a full library scan every time the container starts, which can be time-consuming for large music collections.
+**Using named volumes:**
+
+```yaml
+services:
+  funkstrom:
+    image: ghcr.io/rouhim/funkstrom
+    volumes:
+      - /path/to/music:/music:ro
+      - /path/to/config.toml:/config.toml:ro
+      - funkstrom-data:/app/data
+    ports:
+      - "8284:8284"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped
+
+volumes:
+  funkstrom-data:
+```
+
+#### Managing the Data Directory
+
+**Backup the database:**
+
+```bash
+# Bind mount
+cp /path/to/data/database.db /path/to/backup/database.db
+
+# Named volume
+docker cp funkstrom:/app/data/database.db ./backup/database.db
+```
+
+**Force a full library rescan:**
+
+```bash
+# Bind mount
+rm /path/to/data/database.db
+docker restart funkstrom
+
+# Named volume
+docker exec funkstrom rm /app/data/database.db
+docker restart funkstrom
+```
+
+**Inspect data directory contents:**
+
+```bash
+# Bind mount
+ls -la /path/to/data/
+
+# Named volume
+docker exec funkstrom ls -la /app/data/
+```
 
 ## Frequently Asked Questions
 
