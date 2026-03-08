@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use crossbeam_channel::{unbounded, Receiver};
 use log::{debug, error, info, warn};
+use std::io::ErrorKind;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -10,6 +11,47 @@ const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
 const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
 const INITIAL_BACKOFF_MS: u64 = 1000;
 const MAX_BACKOFF_MS: u64 = 30_000;
+
+fn looks_like_filesystem_path(value: &str) -> bool {
+    value.starts_with('/') || value.contains('/')
+}
+
+fn resolve_ffmpeg_path(configured_path: Option<String>, env_ffmpeg_path: Option<String>) -> String {
+    let configured_path = configured_path
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty());
+
+    if let Some(path) = configured_path.as_ref() {
+        if !looks_like_filesystem_path(path) || Path::new(path).exists() {
+            return path.clone();
+        }
+        warn!(
+            "Configured FFmpeg path '{}' does not exist, trying fallbacks",
+            path
+        );
+    }
+
+    let env_ffmpeg_path = env_ffmpeg_path
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty());
+
+    if let Some(path) = env_ffmpeg_path {
+        if !looks_like_filesystem_path(&path) || Path::new(&path).exists() {
+            return path;
+        }
+        warn!(
+            "FFMPEG_PATH '{}' does not exist, trying built-in fallbacks",
+            path
+        );
+    }
+
+    let container_ffmpeg = "/ffmpeg";
+    if Path::new(container_ffmpeg).exists() {
+        return container_ffmpeg.to_string();
+    }
+
+    "ffmpeg".to_string()
+}
 
 fn calculate_backoff_ms(consecutive_failures: u32) -> u64 {
     let backoff =
@@ -33,8 +75,11 @@ impl FFmpegProcessor {
         channels: u8,
         format: String,
     ) -> Self {
+        let ffmpeg_path = resolve_ffmpeg_path(ffmpeg_path, std::env::var("FFMPEG_PATH").ok());
+        debug!("Using FFmpeg executable: {}", ffmpeg_path);
+
         Self {
-            ffmpeg_path: ffmpeg_path.unwrap_or_else(|| "ffmpeg".to_string()),
+            ffmpeg_path,
             sample_rate,
             bitrate,
             channels,
@@ -73,9 +118,23 @@ impl FFmpegProcessor {
     pub fn check_ffmpeg_available(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         debug!("Checking FFmpeg availability at: {}", self.ffmpeg_path);
 
-        let output = Command::new(&self.ffmpeg_path)
-            .args(["-version"])
-            .output()?;
+        let output = match Command::new(&self.ffmpeg_path).args(["-version"]).output() {
+            Ok(output) => output,
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                return Err(format!(
+                    "FFmpeg executable '{}' was not found. Configure [server].ffmpeg_path or set FFMPEG_PATH.",
+                    self.ffmpeg_path
+                )
+                .into())
+            }
+            Err(err) => {
+                return Err(format!(
+                    "Failed to execute FFmpeg '{}' for startup validation: {}",
+                    self.ffmpeg_path, err
+                )
+                .into())
+            }
+        };
 
         if !output.status.success() {
             return Err(format!("FFmpeg not found at path: {}", self.ffmpeg_path).into());
@@ -330,6 +389,7 @@ pub struct AudioChunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
@@ -432,5 +492,22 @@ mod tests {
     #[test]
     fn given_max_u32_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
         assert_eq!(calculate_backoff_ms(u32::MAX), 30_000);
+    }
+
+    #[test]
+    fn given_missing_config_path_when_resolving_then_uses_env_command_name() {
+        let resolved = resolve_ffmpeg_path(None, Some("ffmpeg-custom".to_string()));
+        assert_eq!(resolved, "ffmpeg-custom");
+    }
+
+    #[test]
+    fn given_missing_config_and_env_when_resolving_then_uses_command_name_fallback() {
+        let resolved = resolve_ffmpeg_path(None, None);
+        let expected = if PathBuf::from("/ffmpeg").exists() {
+            "/ffmpeg"
+        } else {
+            "ffmpeg"
+        };
+        assert_eq!(resolved, expected);
     }
 }

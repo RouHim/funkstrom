@@ -34,9 +34,13 @@ Docker Example:
 ```bash
 docker run -p 8284:8284 \
         -v /path/to/music:/music:ro \
-        -v /path/to/config.toml:/config.toml:ro \  # Optional: override default config
+        -v /path/to/config.toml:/config.toml:ro \
+        -v /path/to/data:/app/data \
         ghcr.io/rouhim/funkstrom
 ```
+
+> [!TIP]
+> Mounting the `/app/data` directory is optional but highly recommended. It stores the SQLite database that indexes your music library. Without it, the server will perform a full library scan every time the container restarts, which can take several minutes for large libraries.
 
 Docker compose example:
 
@@ -46,7 +50,8 @@ services:
     image: ghcr.io/rouhim/funkstrom
     volumes:
       - /path/to/music:/music:ro
-      - /path/to/config.toml:/config.toml:ro  # Optional: override default config
+      - /path/to/config.toml:/config.toml:ro
+      - /path/to/data:/app/data
     ports:
       - "8284:8284"
     environment:

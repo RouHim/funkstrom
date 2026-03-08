@@ -848,6 +848,28 @@ RUST_LOG=info cargo run -- --config config.toml
 - **Restore:** Copy backup back to `./data/database.db` and restart server
 - **Reset:** Delete database file to start fresh
 
+### Docker Usage
+
+When running Funkstrom in a container, it's important to mount the `/app/data/` directory to a persistent volume. This ensures that the music library index is preserved across container restarts.
+
+#### Docker Run
+
+```bash
+docker run -v /path/to/data:/app/data ghcr.io/rouhim/funkstrom
+```
+
+#### Docker Compose
+
+```yaml
+services:
+  funkstrom:
+    image: ghcr.io/rouhim/funkstrom
+    volumes:
+      - /path/to/data:/app/data
+```
+
+Without this volume mount, Funkstrom will perform a full library scan every time the container starts, which can be time-consuming for large music collections.
+
 ## Frequently Asked Questions
 
 ### Can I change configuration without restarting?
