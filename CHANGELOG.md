@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/RouHim/funkstrom/compare/1.0.0...1.0.1) (2026-03-08)
+
+
+### Bug Fixes
+
+* **ci:** make container build work in GitHub Actions ([05ed75f](https://github.com/RouHim/funkstrom/commit/05ed75f8b05a0ea10024f1e7188774f3178923e5))
+
 # 1.0.0 (2026-03-04)
 
 
