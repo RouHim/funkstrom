@@ -42,6 +42,46 @@ docker run -p 8284:8284 \
 > [!TIP]
 > Mounting the `/app/data` directory is optional but highly recommended. It stores the SQLite database that indexes your music library. Without it, the server will perform a full library scan every time the container restarts, which can take several minutes for large libraries.
 
+#### The `/app/data` directory
+
+The container stores persistent data in `/app/data/`:
+
+| File | Purpose |
+|------|---------|
+| `database.db` | SQLite database with track metadata, file paths, shuffle state, and scan timestamps |
+
+**Backup the database:**
+
+```bash
+# Bind mount
+cp /path/to/data/database.db /path/to/backup/database.db
+
+# Named volume
+docker cp funkstrom:/app/data/database.db ./backup/database.db
+```
+
+**Force a full library rescan:**
+
+```bash
+# Bind mount
+rm /path/to/data/database.db
+docker restart funkstrom
+
+# Named volume
+docker exec funkstrom rm /app/data/database.db
+docker restart funkstrom
+```
+
+**Inspect data directory contents:**
+
+```bash
+# Bind mount
+ls -la /path/to/data/
+
+# Named volume
+docker exec funkstrom ls -la /app/data/
+```
+
 Docker Compose example using bind mounts:
 
 ```yaml
