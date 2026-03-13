@@ -22,9 +22,11 @@ use crossbeam_channel::Receiver;
 use library_db::LibraryDatabase;
 use library_scanner::LibraryScanner;
 use schedule_engine::{PlaylistCommand, ScheduleEngine};
-use server_icecast::IcecastServer;
+use server_icecast::{IcecastServer, StreamBufferEntry};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 // Avoid musl's default allocator due to lackluster performance
@@ -44,6 +46,9 @@ struct StreamPipeline {
     receiver: Receiver<AudioChunk>,
     bitrate: u32,
     format: String,
+    listeners: Arc<AtomicUsize>,
+    notify: Arc<Notify>,
+    is_paused: Arc<AtomicBool>,
 }
 
 #[tokio::main]
@@ -79,6 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             stream_buffer,
             pipeline.bitrate,
             pipeline.format.clone(),
+            pipeline.listeners,
+            pipeline.notify,
+            pipeline.is_paused,
         ));
     }
 
@@ -220,16 +228,28 @@ fn setup_audio_pipeline(
             stream_config.format.clone(),
         );
 
+        let listeners = Arc::new(AtomicUsize::new(0));
+        let notify = Arc::new(Notify::new());
+        let is_paused = Arc::new(AtomicBool::new(false));
+
         audio_processor.check_ffmpeg_available()?;
 
         // Each processor gets a clone of the track receiver
-        let audio_rx = audio_processor.start_streaming_service(track_rx.clone());
+        let audio_rx = audio_processor.start_streaming_service(
+            track_rx.clone(),
+            listeners.clone(),
+            notify.clone(),
+            is_paused.clone(),
+        );
 
         stream_pipelines.push(StreamPipeline {
             name: name.clone(),
             receiver: audio_rx,
             bitrate: stream_config.bitrate,
             format: stream_config.format.clone(),
+            listeners,
+            notify,
+            is_paused,
         });
     }
 
@@ -277,7 +297,7 @@ fn start_buffer_writer(
 
 fn start_server(
     config: &Config,
-    stream_buffers: Vec<(String, StreamBuffer, u32, String)>,
+    stream_buffers: Vec<StreamBufferEntry>,
     current_metadata: Arc<Mutex<TrackMetadata>>,
 ) -> JoinHandle<()> {
     let server = IcecastServer::new(

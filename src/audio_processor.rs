@@ -5,12 +5,17 @@ use std::io::ErrorKind;
 use std::io::{BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::Notify;
 
 // Constants for audio processing configuration
 const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
 const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
 const INITIAL_BACKOFF_MS: u64 = 1000;
 const MAX_BACKOFF_MS: u64 = 30_000;
+const IDLE_GRACE_PERIOD_SECS: u64 = 60;
 
 fn looks_like_filesystem_path(value: &str) -> bool {
     value.starts_with('/') || value.contains('/')
@@ -218,6 +223,9 @@ impl FFmpegProcessor {
     pub fn start_streaming_service(
         self,
         track_rx: Receiver<std::path::PathBuf>,
+        listener_count: Arc<AtomicUsize>,
+        listener_notify: Arc<Notify>,
+        is_paused: Arc<AtomicBool>,
     ) -> Receiver<AudioChunk> {
         let (audio_tx, audio_rx) = unbounded::<AudioChunk>();
 
@@ -225,33 +233,69 @@ impl FFmpegProcessor {
             let mut current_process: Option<AudioProcess> = None;
             let mut current_track: Option<std::path::PathBuf> = None;
             let mut consecutive_failures: u32 = 0;
+            let mut idle_since: Option<Instant> = None;
 
             loop {
                 // Start new process if needed
                 if current_process.is_none() {
-                    // Try to get next track
-                    if let Ok(track) = track_rx.try_recv() {
-                        current_track = Some(track.clone());
+                    let listener_count_val = listener_count.load(Ordering::SeqCst);
 
-                        // Check if track is a URL or local file
-                        let track_str = track.to_str().unwrap_or("");
-                        let result = if track_str.starts_with("http://")
-                            || track_str.starts_with("https://")
+                    if listener_count_val == 0 {
+                        if idle_since.is_none() {
+                            idle_since = Some(Instant::now());
+                            info!("No listeners, entering grace period");
+                        } else if idle_since
+                            .as_ref()
+                            .map(|start| start.elapsed().as_secs() > IDLE_GRACE_PERIOD_SECS)
+                            .unwrap_or(false)
                         {
-                            info!("Starting stream from URL: {}", track_str);
-                            self.start_conversion_from_url(track_str)
-                        } else {
-                            self.start_conversion_process(&track)
-                        };
+                            is_paused.store(true, Ordering::SeqCst);
+                            info!(
+                                "No listeners for {}s, pausing FFmpeg processing",
+                                IDLE_GRACE_PERIOD_SECS
+                            );
 
-                        match result {
-                            Ok(process) => {
-                                debug!("Started processing track: {:?}", track);
-                                current_process = Some(process);
+                            tokio::select! {
+                                _ = listener_notify.notified() => {
+                                    is_paused.store(false, Ordering::SeqCst);
+                                    info!("Listener connected, resuming FFmpeg processing");
+                                    idle_since = None;
+                                }
                             }
-                            Err(e) => {
-                                error!("Failed to start FFmpeg process for {:?}: {}", track, e);
-                                consecutive_failures += 1;
+
+                            continue;
+                        }
+                    } else {
+                        idle_since = None;
+                    }
+
+                    if listener_count_val > 0 {
+                        is_paused.store(false, Ordering::SeqCst);
+
+                        // Try to get next track
+                        if let Ok(track) = track_rx.try_recv() {
+                            current_track = Some(track.clone());
+
+                            // Check if track is a URL or local file
+                            let track_str = track.to_str().unwrap_or("");
+                            let result = if track_str.starts_with("http://")
+                                || track_str.starts_with("https://")
+                            {
+                                info!("Starting stream from URL: {}", track_str);
+                                self.start_conversion_from_url(track_str)
+                            } else {
+                                self.start_conversion_process(&track)
+                            };
+
+                            match result {
+                                Ok(process) => {
+                                    debug!("Started processing track: {:?}", track);
+                                    current_process = Some(process);
+                                }
+                                Err(e) => {
+                                    error!("Failed to start FFmpeg process for {:?}: {}", track, e);
+                                    consecutive_failures += 1;
+                                }
                             }
                         }
                     }
@@ -509,5 +553,10 @@ mod tests {
             "ffmpeg"
         };
         assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    fn given_idle_grace_period_constant_then_equals_60_seconds() {
+        assert_eq!(IDLE_GRACE_PERIOD_SECS, 60);
     }
 }

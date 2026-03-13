@@ -113,9 +113,19 @@ struct StreamEndpoint {
     is_paused: Arc<AtomicBool>,
 }
 
+pub type StreamBufferEntry = (
+    String,
+    StreamBuffer,
+    u32,
+    String,
+    Arc<AtomicUsize>,
+    Arc<tokio::sync::Notify>,
+    Arc<AtomicBool>,
+);
+
 impl IcecastServer {
     pub fn new(
-        stream_buffers: Vec<(String, StreamBuffer, u32, String)>,
+        stream_buffers: Vec<StreamBufferEntry>,
         station_name: String,
         station_description: String,
         station_genre: String,
@@ -123,15 +133,17 @@ impl IcecastServer {
     ) -> Self {
         let streams = stream_buffers
             .into_iter()
-            .map(|(name, buffer, bitrate, format)| StreamEndpoint {
-                name,
-                buffer,
-                bitrate,
-                format,
-                listeners: Arc::new(AtomicUsize::new(0)),
-                notify: Arc::new(tokio::sync::Notify::new()),
-                is_paused: Arc::new(AtomicBool::new(false)),
-            })
+            .map(
+                |(name, buffer, bitrate, format, listeners, notify, is_paused)| StreamEndpoint {
+                    name,
+                    buffer,
+                    bitrate,
+                    format,
+                    listeners,
+                    notify,
+                    is_paused,
+                },
+            )
             .collect();
 
         Self {
