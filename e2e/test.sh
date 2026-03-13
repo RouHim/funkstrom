@@ -119,6 +119,48 @@ else
     ((FAIL++))
 fi
 
+sleep 1
+
+# Test 10: Status shows listener count (zero listeners at start)
+echo "Test 10: Status shows listener count"
+LISTENERS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].listeners')
+if [ "$LISTENERS" = "0" ]; then
+    echo "  ✓ PASS (listeners: $LISTENERS)"
+    ((PASS++))
+else
+    echo "  ✗ FAIL (expected 0, got: $LISTENERS)"
+    ((FAIL++))
+fi
+
+# Test 11: Listener count increments on connection
+echo "Test 11: Listener count increments on connection"
+STREAM_NAME=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].name')
+curl -s -N "${BASE_URL}/${STREAM_NAME}" > /dev/null 2>&1 &
+CURL_PID=$!
+sleep 1
+LISTENERS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].listeners')
+if [ "$LISTENERS" -ge 1 ]; then
+    echo "  ✓ PASS (listeners: $LISTENERS)"
+    ((PASS++))
+else
+    echo "  ✗ FAIL (expected >= 1, got: $LISTENERS)"
+    ((FAIL++))
+fi
+kill $CURL_PID 2>/dev/null
+wait $CURL_PID 2>/dev/null
+
+# Test 12: Listener count decrements on disconnect
+echo "Test 12: Listener count decrements on disconnect"
+sleep 2
+LISTENERS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].listeners')
+if [ "$LISTENERS" = "0" ]; then
+    echo "  ✓ PASS (listeners: $LISTENERS)"
+    ((PASS++))
+else
+    echo "  ✗ FAIL (expected 0, got: $LISTENERS)"
+    ((FAIL++))
+fi
+
 echo
 echo "=== Results ==="
 echo "Passed: $PASS"
