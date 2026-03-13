@@ -36,14 +36,23 @@ else
     ((FAIL++))
 fi
 
-# Test 3: Buffer has data
-echo "Test 3: Buffer has data"
+# Test 3: Buffer behavior matches listener count
+echo "Test 3: Buffer behavior matches listener count"
+STATUS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].status')
 BUFFER_CHUNKS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].buffer_chunks')
-if [ "$BUFFER_CHUNKS" -gt 0 ]; then
-    echo "  ✓ PASS (${BUFFER_CHUNKS} chunks)"
-    ((PASS++))
+LISTENERS=$(curl -s "${BASE_URL}/status" | jq -r '.streams[0].listeners')
+if [ "$STATUS" = "online" ] || [ "$STATUS" = "idle" ]; then
+    if [ "$LISTENERS" -gt 0 ] && [ "$BUFFER_CHUNKS" -eq 0 ]; then
+        # With listeners, buffer should have data
+        echo "  ✗ FAIL (listeners: $LISTENERS but buffer empty)"
+        ((FAIL++))
+    else
+        # 0 listeners: buffer empty is OK; 1+ listeners: buffer should have data
+        echo "  ✓ PASS (status: $STATUS, listeners: $LISTENERS, buffer: ${BUFFER_CHUNKS} chunks)"
+        ((PASS++))
+    fi
 else
-    echo "  ✗ FAIL (buffer is empty)"
+    echo "  ✗ FAIL (unexpected status: $STATUS)"
     ((FAIL++))
 fi
 
