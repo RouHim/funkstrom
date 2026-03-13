@@ -3,6 +3,7 @@ use crate::audio_metadata::TrackMetadata;
 use crate::server_swagger;
 use minijinja::Environment;
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -26,6 +27,7 @@ struct StreamStatus {
     status: String,
     buffer_chunks: usize,
     buffer_bytes: usize,
+    listeners: usize,
 }
 
 // Template context structures
@@ -50,6 +52,29 @@ struct StreamLink {
     url: String,
 }
 
+// RAII guard for listener tracking
+struct ListenerGuard {
+    listeners: Arc<AtomicUsize>,
+    #[allow(dead_code)]
+    notify: Arc<tokio::sync::Notify>,
+}
+
+impl ListenerGuard {
+    fn new(listeners: Arc<AtomicUsize>, notify: Arc<tokio::sync::Notify>) -> Self {
+        let was_zero = listeners.fetch_add(1, Ordering::SeqCst) == 0;
+        if was_zero {
+            notify.notify_one();
+        }
+        Self { listeners, notify }
+    }
+}
+
+impl Drop for ListenerGuard {
+    fn drop(&mut self) {
+        self.listeners.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 // Context for handling stream requests
 #[derive(Clone)]
 struct StreamContext {
@@ -59,6 +84,10 @@ struct StreamContext {
     station_name: String,
     station_description: String,
     station_genre: String,
+    listeners: Arc<AtomicUsize>,
+    notify: Arc<tokio::sync::Notify>,
+    #[allow(dead_code)]
+    is_paused: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -79,6 +108,9 @@ struct StreamEndpoint {
     buffer: StreamBuffer,
     bitrate: u32,
     format: String,
+    listeners: Arc<AtomicUsize>,
+    notify: Arc<tokio::sync::Notify>,
+    is_paused: Arc<AtomicBool>,
 }
 
 impl IcecastServer {
@@ -96,6 +128,9 @@ impl IcecastServer {
                 buffer,
                 bitrate,
                 format,
+                listeners: Arc::new(AtomicUsize::new(0)),
+                notify: Arc::new(tokio::sync::Notify::new()),
+                is_paused: Arc::new(AtomicBool::new(false)),
             })
             .collect();
 
@@ -148,6 +183,9 @@ impl IcecastServer {
                                 station_name: station_name.clone(),
                                 station_description: station_description.clone(),
                                 station_genre: station_genre.clone(),
+                                listeners: stream.listeners.clone(),
+                                notify: stream.notify.clone(),
+                                is_paused: stream.is_paused.clone(),
                             };
                             return Self::handle_stream_request(headers, context).await;
                         }
@@ -219,8 +257,11 @@ impl IcecastServer {
 
         let (tx, rx) = mpsc::unbounded_channel();
         let buffer = context.buffer.clone();
+        let listeners = context.listeners.clone();
+        let notify = context.notify.clone();
 
         tokio::spawn(async move {
+            let _guard = ListenerGuard::new(listeners, notify);
             let mut last_data_time = Instant::now();
             let timeout_duration = Duration::from_secs(30);
 
@@ -283,16 +324,24 @@ impl IcecastServer {
             .map(|stream| {
                 let (chunks, bytes) = stream.buffer.buffer_info();
                 let is_running = stream.buffer.is_running();
+                let is_paused = stream.is_paused.load(Ordering::SeqCst);
+                let listeners = stream.listeners.load(Ordering::SeqCst);
+
+                let status = if is_running && is_paused {
+                    "idle".to_string()
+                } else if is_running {
+                    "online".to_string()
+                } else {
+                    "offline".to_string()
+                };
+
                 StreamStatus {
                     name: stream.name.clone(),
                     bitrate: stream.bitrate,
-                    status: if is_running {
-                        "online".to_string()
-                    } else {
-                        "offline".to_string()
-                    },
+                    status,
                     buffer_chunks: chunks,
                     buffer_bytes: bytes,
+                    listeners,
                 }
             })
             .collect();
@@ -407,5 +456,64 @@ impl IcecastServer {
             "Content-Type",
             "text/html; charset=utf-8",
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn given_new_guard_when_created_then_increments_counter() {
+        let listeners = Arc::new(AtomicUsize::new(0));
+        let notify = Arc::new(tokio::sync::Notify::new());
+
+        assert_eq!(listeners.load(Ordering::SeqCst), 0);
+        let _guard = ListenerGuard::new(listeners.clone(), notify);
+        assert_eq!(listeners.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn given_guard_when_dropped_then_decrements_counter() {
+        let listeners = Arc::new(AtomicUsize::new(1));
+        let notify = Arc::new(tokio::sync::Notify::new());
+
+        let guard = ListenerGuard::new(listeners.clone(), notify);
+        assert_eq!(listeners.load(Ordering::SeqCst), 2);
+        drop(guard);
+        assert_eq!(listeners.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn given_multiple_guards_when_one_dropped_then_counter_reflects_remaining() {
+        let listeners = Arc::new(AtomicUsize::new(0));
+        let notify = Arc::new(tokio::sync::Notify::new());
+
+        let guard1 = ListenerGuard::new(listeners.clone(), notify.clone());
+        let guard2 = ListenerGuard::new(listeners.clone(), notify.clone());
+        let guard3 = ListenerGuard::new(listeners.clone(), notify.clone());
+
+        assert_eq!(listeners.load(Ordering::SeqCst), 3);
+        drop(guard1);
+        assert_eq!(listeners.load(Ordering::SeqCst), 2);
+        drop(guard2);
+        assert_eq!(listeners.load(Ordering::SeqCst), 1);
+        drop(guard3);
+        assert_eq!(listeners.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn given_stream_status_with_listeners_when_serialized_then_json_contains_listeners() {
+        let status = StreamStatus {
+            name: "test_stream".to_string(),
+            bitrate: 128,
+            status: "online".to_string(),
+            buffer_chunks: 10,
+            buffer_bytes: 4096,
+            listeners: 5,
+        };
+
+        let json = serde_json::to_string(&status).expect("serialization failed");
+        assert!(json.contains("\"listeners\":5"));
     }
 }
