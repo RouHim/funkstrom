@@ -4,10 +4,13 @@ mod audio_processor;
 mod audio_reader;
 mod cli;
 mod config;
+#[allow(dead_code)]
+mod fanout_buffer;
 mod hearthis_client;
 mod library_db;
 mod library_scanner;
 mod m3u_parser;
+mod playback_director;
 mod schedule_engine;
 mod server_icecast;
 mod server_swagger;
