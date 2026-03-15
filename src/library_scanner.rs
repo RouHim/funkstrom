@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
@@ -343,19 +344,70 @@ impl LibraryScanner {
         };
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let duration = self.extract_duration_seconds(path);
 
         Ok(TrackRecord {
             file_path,
             title,
             artist,
             album,
-            duration_seconds: None,
+            duration_seconds: duration,
             file_size,
             last_modified,
             file_extension: extension,
             created_at: now,
             updated_at: now,
         })
+    }
+
+    fn extract_duration_seconds(&self, path: &Path) -> Option<i64> {
+        let path_str = path.to_string_lossy().to_string();
+
+        match Command::new("ffprobe")
+            .arg("-v")
+            .arg("error")
+            .arg("-show_entries")
+            .arg("format=duration")
+            .arg("-of")
+            .arg("default=noprint_wrappers=1:nokey=1")
+            .arg(&path_str)
+            .output()
+        {
+            Ok(output) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8(output.stdout).ok()?;
+                    let duration_str = stdout.trim();
+
+                    match duration_str.parse::<f64>() {
+                        Ok(duration_f64) => {
+                            let duration_i64 = (duration_f64 + 0.5) as i64;
+                            debug!(
+                                "Extracted duration {} seconds from {:?}",
+                                duration_i64, path
+                            );
+                            Some(duration_i64)
+                        }
+                        Err(e) => {
+                            debug!(
+                                "Failed to parse duration '{}' from ffprobe: {}",
+                                duration_str, e
+                            );
+                            Some(180)
+                        }
+                    }
+                } else {
+                    debug!(
+                        "ffprobe failed with status: {} for {:?}",
+                        output.status, path
+                    );
+                    Some(180)
+                }
+            }
+            Err(e) => {
+                debug!("Failed to spawn ffprobe process: {} for {:?}", e, path);
+                Some(180)
+            }
+        }
     }
 
     fn get_file_mtime(&self, path: &Path) -> Result<i64, Box<dyn Error + Send + Sync>> {
@@ -568,5 +620,51 @@ mod tests {
         let result = scanner.full_scan().unwrap();
 
         assert_eq!(result.added, 8);
+    }
+
+    #[test]
+    fn test_extract_duration_seconds_from_local_file() {
+        let temp_dir = TempDir::new().unwrap();
+        // Create a test MP3 file with some binary content
+        let test_file = temp_dir.path().join("test.mp3");
+        let mut file = File::create(&test_file).unwrap();
+        // Write minimal MP3 header to make ffprobe recognize it
+        file.write_all(&[
+            0xFF, 0xFB, 0x90, 0x00, // MP3 sync word and header
+        ])
+        .unwrap();
+        drop(file);
+
+        let scanner = LibraryScanner::new(
+            temp_dir.path().to_path_buf(),
+            LibraryDatabase::new(":memory:").unwrap(),
+        );
+        let duration = scanner.extract_duration_seconds(&test_file);
+
+        // Duration should be Some value, either from ffprobe or fallback (180)
+        assert!(duration.is_some());
+        // If ffprobe works, duration should be > 0; if fallback, should be 180
+        if let Some(d) = duration {
+            assert!(d > 0);
+        }
+    }
+
+    #[test]
+    fn test_extract_duration_fallback_on_invalid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        // Create a file with no audio content (invalid)
+        let test_file = temp_dir.path().join("invalid.mp3");
+        let mut file = File::create(&test_file).unwrap();
+        file.write_all(b"not audio").unwrap();
+        drop(file);
+
+        let scanner = LibraryScanner::new(
+            temp_dir.path().to_path_buf(),
+            LibraryDatabase::new(":memory:").unwrap(),
+        );
+        let duration = scanner.extract_duration_seconds(&test_file);
+
+        // Should fallback to 180 seconds
+        assert_eq!(duration, Some(180));
     }
 }
