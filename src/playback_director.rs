@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::audio_metadata::TrackMetadata;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -10,6 +11,9 @@ use tokio::sync::watch;
 pub struct TrackInfo {
     pub path: PathBuf,
     pub duration_secs: i64,
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +23,7 @@ pub struct TimelineSnapshot {
     pub elapsed_in_track_secs: f64,
     pub generation: u64,
     pub is_encoding_active: bool,
+    pub current_metadata: TrackMetadata,
 }
 
 pub struct PlaybackDirector {
@@ -168,10 +173,28 @@ impl PlaybackDirector {
                 elapsed_in_track_secs: 0.0,
                 generation,
                 is_encoding_active,
+                current_metadata: TrackMetadata::default(),
             };
         }
 
         let index = current_index.min(playlist.len() - 1);
+        let track_info = &playlist[index];
+
+        let current_metadata = TrackMetadata {
+            title: track_info
+                .title
+                .clone()
+                .unwrap_or_else(|| "Unknown Track".to_string()),
+            artist: track_info
+                .artist
+                .clone()
+                .unwrap_or_else(|| "Unknown Artist".to_string()),
+            album: track_info
+                .album
+                .clone()
+                .unwrap_or_else(|| "Unknown Album".to_string()),
+            file_path: track_info.path.to_string_lossy().to_string(),
+        };
 
         TimelineSnapshot {
             track_path: playlist[index].path.clone(),
@@ -181,6 +204,7 @@ impl PlaybackDirector {
                 .as_secs_f64(),
             generation,
             is_encoding_active,
+            current_metadata,
         }
     }
 }
@@ -194,6 +218,9 @@ mod tests {
         TrackInfo {
             path: PathBuf::from(path),
             duration_secs,
+            title: None,
+            artist: None,
+            album: None,
         }
     }
 

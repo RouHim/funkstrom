@@ -2,7 +2,7 @@ use audiotags::Tag;
 use log::{debug, warn};
 use std::path::Path;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TrackMetadata {
     pub title: String,
     pub artist: String,

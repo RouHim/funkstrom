@@ -17,7 +17,6 @@ mod schedule_engine;
 mod server_icecast;
 mod server_swagger;
 
-use audio_metadata::TrackMetadata;
 use audio_processor::{AudioChunk, FFmpegProcessor};
 use audio_reader::AudioReader;
 use cli::get_config_path;
@@ -26,13 +25,13 @@ use crossbeam_channel::{unbounded, Receiver};
 use fanout_buffer::{FanoutBuffer, SharedFanoutBuffer};
 use library_db::LibraryDatabase;
 use library_scanner::LibraryScanner;
-use playback_director::PlaybackDirector;
+use playback_director::{PlaybackDirector, TimelineSnapshot};
 use schedule_engine::{PlaylistCommand, ScheduleEngine};
 use server_icecast::{IcecastServer, StreamBufferEntry};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
 use tokio::task::JoinHandle;
 
 // Avoid musl's default allocator due to lackluster performance
@@ -43,7 +42,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 type AudioPipeline = (
     Vec<StreamPipeline>,
-    Arc<Mutex<TrackMetadata>>,
+    watch::Receiver<TimelineSnapshot>,
 );
 
 struct StreamPipeline {
@@ -71,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize components
     let (db, scanner) = initialize_library(&config)?;
     let schedule_rx = setup_schedule_engine(&config);
-    let (stream_pipelines, current_metadata) = setup_audio_pipeline(&config, db, schedule_rx)?;
+    let (stream_pipelines, timeline_rx) = setup_audio_pipeline(&config, db, schedule_rx)?;
 
     // Set up streaming buffers and buffer writers for each stream
     let mut buffer_writer_handles = Vec::new();
@@ -93,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     // Start server
-    let server_handle = start_server(&config, stream_buffers, current_metadata);
+    let server_handle = start_server(&config, stream_buffers, timeline_rx);
 
     log_server_urls(&config);
 
@@ -202,7 +201,6 @@ fn setup_audio_pipeline(
     let audio_reader =
         AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
 
-    let current_metadata = audio_reader.get_current_metadata();
     let initial_playlist = audio_reader.build_playlist();
 
     if initial_playlist.is_empty() {
@@ -228,6 +226,13 @@ fn setup_audio_pipeline(
     }
 
     audio_reader.start_schedule_command_service(schedule_rx, director.clone());
+
+    // Get timeline_rx for the server to use
+    let timeline_rx = director
+        .lock()
+        .map_err(|e| format!("PlaybackDirector lock poisoned: {}", e))?
+        .snapshot_tx
+        .subscribe();
 
     // Create a processor for each enabled stream
     let mut stream_pipelines = Vec::new();
@@ -261,14 +266,14 @@ fn setup_audio_pipeline(
 
         audio_processor.check_ffmpeg_available()?;
 
-        let timeline_rx = director
+        let timeline_rx_stream = director
             .lock()
             .map_err(|e| format!("PlaybackDirector lock poisoned: {}", e))?
             .snapshot_tx
             .subscribe();
 
         let (audio_tx, audio_rx) = unbounded();
-        audio_processor.start_timeline_streaming_service(timeline_rx, audio_tx, is_paused.clone());
+        audio_processor.start_timeline_streaming_service(timeline_rx_stream, audio_tx, is_paused.clone());
 
         stream_pipelines.push(StreamPipeline {
             name: name.clone(),
@@ -288,7 +293,7 @@ fn setup_audio_pipeline(
 
     log::info!("Initialized {} stream(s)", stream_pipelines.len());
 
-    Ok((stream_pipelines, current_metadata))
+    Ok((stream_pipelines, timeline_rx))
 }
 
 fn start_buffer_writer(
@@ -328,14 +333,14 @@ fn start_buffer_writer(
 fn start_server(
     config: &Config,
     stream_buffers: Vec<StreamBufferEntry>,
-    current_metadata: Arc<Mutex<TrackMetadata>>,
+    timeline_rx: watch::Receiver<TimelineSnapshot>,
 ) -> JoinHandle<()> {
     let server = IcecastServer::new(
         stream_buffers,
         config.station.name.clone(),
         config.station.description.clone(),
         config.station.genre.clone(),
-        current_metadata,
+        timeline_rx,
     );
 
     let bind_address = config.server.bind_address.clone();

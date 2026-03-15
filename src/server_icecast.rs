@@ -1,12 +1,12 @@
-use crate::audio_metadata::TrackMetadata;
 use crate::fanout_buffer::SharedFanoutBuffer;
+use crate::playback_director::TimelineSnapshot;
 use crate::server_swagger;
 use minijinja::Environment;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::{http::HeaderMap, Filter, Reply};
 
@@ -96,7 +96,7 @@ pub struct IcecastServer {
     station_name: String,
     station_description: String,
     station_genre: String,
-    current_metadata: Arc<Mutex<TrackMetadata>>,
+    timeline_rx: watch::Receiver<TimelineSnapshot>,
     bind_address: Arc<Mutex<String>>,
     port: Arc<Mutex<u16>>,
     start_time: Instant,
@@ -129,7 +129,7 @@ impl IcecastServer {
         station_name: String,
         station_description: String,
         station_genre: String,
-        current_metadata: Arc<Mutex<TrackMetadata>>,
+        timeline_rx: watch::Receiver<TimelineSnapshot>,
     ) -> Self {
         let streams = stream_buffers
             .into_iter()
@@ -151,7 +151,7 @@ impl IcecastServer {
             station_name,
             station_description,
             station_genre,
-            current_metadata,
+            timeline_rx,
             bind_address: Arc::new(Mutex::new(String::new())),
             port: Arc::new(Mutex::new(0)),
             start_time: Instant::now(),
@@ -275,7 +275,7 @@ impl IcecastServer {
         tokio::spawn(async move {
             let _guard = ListenerGuard::new(listeners, notify);
             let mut cursor = match buffer.write() {
-                Ok(guard) => guard.new_cursor(),
+                Ok(guard) => guard.new_cursor_with_burst(50),
                 Err(e) => {
                     log::error!("Failed to initialize listener cursor: {}", e);
                     return;
@@ -304,7 +304,7 @@ impl IcecastServer {
                         log::warn!("No data available for too long, disconnecting client");
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                 }
             }
         });
@@ -405,11 +405,8 @@ impl IcecastServer {
     }
 
     async fn handle_current_request(&self) -> Result<impl Reply, warp::Rejection> {
-        let metadata = self
-            .current_metadata
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let json = metadata.to_json();
+        let snapshot = self.timeline_rx.borrow().clone();
+        let json = snapshot.current_metadata.to_json();
 
         Ok(warp::reply::with_header(
             json,
@@ -419,12 +416,9 @@ impl IcecastServer {
     }
 
     async fn handle_info_request(&self) -> Result<impl Reply, warp::Rejection> {
-        let metadata = self
-            .current_metadata
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let current_track = metadata.to_icy_metadata();
-        let album = &metadata.album;
+        let snapshot = self.timeline_rx.borrow().clone();
+        let current_track = snapshot.current_metadata.to_icy_metadata();
+        let album = &snapshot.current_metadata.album;
 
         let bind_address = self
             .bind_address

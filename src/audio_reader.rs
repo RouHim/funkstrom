@@ -25,7 +25,6 @@ pub struct AudioReader {
     library_shuffle: bool,
     #[allow(dead_code)]
     library_repeat: bool,
-    current_metadata: Arc<Mutex<TrackMetadata>>,
     db: LibraryDatabase,
     shuffle_seed: u64,
 }
@@ -53,14 +52,14 @@ impl AudioReader {
         Ok(Self {
             library_shuffle: shuffle,
             library_repeat: repeat,
-            current_metadata: Arc::new(Mutex::new(TrackMetadata::default())),
             db,
             shuffle_seed,
         })
     }
 
+    #[allow(dead_code)]
     pub fn get_current_metadata(&self) -> Arc<Mutex<TrackMetadata>> {
-        Arc::clone(&self.current_metadata)
+        Arc::new(Mutex::new(TrackMetadata::default()))
     }
 
     #[allow(dead_code)]
@@ -86,6 +85,9 @@ impl AudioReader {
                         );
                         180
                     }),
+                    title: Some(t.title),
+                    artist: Some(t.artist),
+                    album: Some(t.album),
                 }
             })
             .collect();
@@ -205,6 +207,9 @@ impl AudioReader {
                             let playlist = vec![TrackInfo {
                                 path: PathBuf::from(track.stream_url),
                                 duration_secs: liveset_duration,
+                                title: Some(track.title.clone()),
+                                artist: Some(track.user.username.clone()),
+                                album: None,
                             }];
 
                             info!(
@@ -249,7 +254,13 @@ impl AudioReader {
                     warn!("Track {:?} has no known duration, using {}s fallback", path, fallback);
                     fallback
                 });
-                TrackInfo { path, duration_secs }
+                TrackInfo {
+                    path,
+                    duration_secs,
+                    title: None,
+                    artist: None,
+                    album: None,
+                }
             })
             .collect()
     }
