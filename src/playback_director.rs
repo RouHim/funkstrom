@@ -2,7 +2,7 @@
 
 use crate::audio_metadata::TrackMetadata;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
@@ -37,12 +37,7 @@ pub struct PlaybackDirector {
 impl PlaybackDirector {
     pub fn new(playlist: Vec<TrackInfo>, listener_count: Arc<AtomicUsize>) -> Self {
         let track_started_at = Instant::now();
-        let initial_snapshot = Self::snapshot_from_state(
-            &playlist,
-            0,
-            track_started_at,
-            0,
-        );
+        let initial_snapshot = Self::snapshot_from_state(&playlist, 0, track_started_at, 0);
         let (snapshot_tx, _) = watch::channel(initial_snapshot);
 
         Self {
@@ -201,6 +196,7 @@ impl PlaybackDirector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
     use std::thread;
     use tokio::time::timeout;
 
@@ -320,7 +316,10 @@ mod tests {
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners.clone());
 
         director.tick();
-        assert_eq!(director.current_snapshot().track_path, PathBuf::from("a.mp3"));
+        assert_eq!(
+            director.current_snapshot().track_path,
+            PathBuf::from("a.mp3")
+        );
 
         listeners.store(0, Ordering::SeqCst);
         director.tick();

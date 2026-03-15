@@ -408,28 +408,38 @@ impl FFmpegProcessor {
             let mut current_snapshot = timeline_rx.borrow().clone();
             let mut consecutive_failures: u32 = 0;
 
+            let apply_snapshot_update =
+                |next_snapshot: TimelineSnapshot,
+                 current_snapshot: &mut TimelineSnapshot,
+                 current_process: &mut Option<AudioProcess>,
+                 consecutive_failures: &mut u32| {
+                    let should_restart = next_snapshot.generation != current_snapshot.generation
+                        || next_snapshot.track_path != current_snapshot.track_path;
+
+                    if should_restart {
+                        if let Some(process) = current_process.take() {
+                            process.terminate()
+                        }
+                        // Reset consecutive failures on generation change
+                        if next_snapshot.generation != current_snapshot.generation {
+                            *consecutive_failures = 0;
+                        }
+                    }
+
+                    *current_snapshot = next_snapshot;
+                };
+
             loop {
                 if timeline_rx.has_changed().unwrap_or(false) {
                     match timeline_rx.changed().await {
                         Ok(()) => {
                             let next_snapshot = timeline_rx.borrow_and_update().clone();
-                            let should_restart = next_snapshot.generation
-                                != current_snapshot.generation
-                                || next_snapshot.track_path != current_snapshot.track_path
-                                || next_snapshot.is_encoding_active
-                                    != current_snapshot.is_encoding_active;
-
-                            if should_restart {
-                                if let Some(process) = current_process.take() {
-                                    process.terminate();
-                                }
-                                // Reset consecutive failures on generation change
-                                if next_snapshot.generation != current_snapshot.generation {
-                                    consecutive_failures = 0;
-                                }
-                            }
-
-                            current_snapshot = next_snapshot;
+                            apply_snapshot_update(
+                                next_snapshot,
+                                &mut current_snapshot,
+                                &mut current_process,
+                                &mut consecutive_failures,
+                            );
                         }
                         Err(_) => {
                             debug!("Timeline sender dropped, stopping timeline streaming service");
@@ -438,13 +448,9 @@ impl FFmpegProcessor {
                     }
                 }
 
-                if !current_snapshot.is_encoding_active {
-                    is_paused.store(true, Ordering::SeqCst);
-                } else {
-                    is_paused.store(false, Ordering::SeqCst);
-                }
+                is_paused.store(false, Ordering::SeqCst);
 
-                if current_process.is_none() && current_snapshot.is_encoding_active {
+                if current_process.is_none() {
                     let track = current_snapshot.track_path.clone();
 
                     if track.as_os_str().is_empty() {
@@ -521,13 +527,37 @@ impl FFmpegProcessor {
                 } else {
                     PROCESS_POLL_INTERVAL_MS
                 };
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+
+                if consecutive_failures > 0 {
+                    tokio::select! {
+                        _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {}
+                        changed = timeline_rx.changed() => {
+                            match changed {
+                                Ok(()) => {
+                                    let next_snapshot = timeline_rx.borrow_and_update().clone();
+                                    apply_snapshot_update(
+                                        next_snapshot,
+                                        &mut current_snapshot,
+                                        &mut current_process,
+                                        &mut consecutive_failures,
+                                    );
+                                }
+                                Err(_) => {
+                                    debug!("Timeline sender dropped, stopping timeline streaming service");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                }
             }
 
             if let Some(process) = current_process.take() {
                 process.terminate();
             }
-            is_paused.store(true, Ordering::SeqCst);
+            is_paused.store(false, Ordering::SeqCst);
         });
     }
 }
@@ -633,13 +663,12 @@ mod tests {
     use tempfile::tempdir;
     use tokio::sync::watch;
 
-    fn snapshot_with(track: &str, generation: u64, is_encoding_active: bool) -> TimelineSnapshot {
+    fn snapshot_with(track: &str, generation: u64) -> TimelineSnapshot {
         TimelineSnapshot {
             track_path: PathBuf::from(track),
             track_index: 0,
             elapsed_in_track_secs: 0.0,
             generation,
-            is_encoding_active,
             current_metadata: TrackMetadata::default(),
         }
     }
@@ -867,18 +896,19 @@ exit 0
 "#,
         );
 
-        let processor = FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
-        let (timeline_tx, timeline_rx) = watch::channel(snapshot_with(
-            "https://example.com/ungated-stream",
-            0,
-            false,
-        ));
+        let processor =
+            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) =
+            watch::channel(snapshot_with("https://example.com/ungated-stream", 0));
         let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
         let is_paused = Arc::new(AtomicBool::new(false));
 
         processor.start_timeline_streaming_service(timeline_rx, chunk_tx, is_paused);
 
-        let recv_result = chunk_rx.recv_timeout(Duration::from_millis(300));
+        let recv_result =
+            tokio::task::spawn_blocking(move || chunk_rx.recv_timeout(Duration::from_millis(300)))
+                .await
+                .expect("blocking receiver task should join successfully");
         drop(timeline_tx);
 
         assert!(
@@ -903,12 +933,10 @@ exit 1
 "#,
         );
 
-        let processor = FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
-        let (timeline_tx, timeline_rx) = watch::channel(snapshot_with(
-            "https://example.com/failing-stream",
-            0,
-            true,
-        ));
+        let processor =
+            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) =
+            watch::channel(snapshot_with("https://example.com/failing-stream", 0));
         let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
         let is_paused = Arc::new(AtomicBool::new(false));
 
@@ -917,16 +945,19 @@ exit 1
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         timeline_tx
-            .send(snapshot_with("", 1, true))
+            .send(snapshot_with("", 1))
             .expect("first generation change should be delivered");
 
         tokio::time::sleep(Duration::from_millis(30)).await;
 
         timeline_tx
-            .send(snapshot_with("https://example.com/ok-stream", 2, true))
+            .send(snapshot_with("https://example.com/ok-stream", 2))
             .expect("second generation change should be delivered");
 
-        let recv_result = chunk_rx.recv_timeout(Duration::from_millis(350));
+        let recv_result =
+            tokio::task::spawn_blocking(move || chunk_rx.recv_timeout(Duration::from_millis(350)))
+                .await
+                .expect("blocking receiver task should join successfully");
         drop(timeline_tx);
 
         assert!(
@@ -938,11 +969,8 @@ exit 1
     #[tokio::test(flavor = "current_thread")]
     async fn given_is_encoding_active_false_when_processing_then_is_paused_never_true() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        let (timeline_tx, timeline_rx) = watch::channel(snapshot_with(
-            "https://example.com/stream",
-            0,
-            false,
-        ));
+        let (timeline_tx, timeline_rx) =
+            watch::channel(snapshot_with("https://example.com/stream", 0));
         let (chunk_tx, _chunk_rx) = unbounded::<AudioChunk>();
         let is_paused = Arc::new(AtomicBool::new(false));
 
