@@ -213,6 +213,7 @@ impl PlaybackDirector {
 mod tests {
     use super::*;
     use std::thread;
+    use tokio::time::timeout;
 
     fn track(path: &str, duration_secs: i64) -> TrackInfo {
         TrackInfo {
@@ -305,5 +306,69 @@ mod tests {
         let snapshot = director.current_snapshot();
         assert_eq!(snapshot.track_path, PathBuf::from("ok.mp3"));
         assert_eq!(snapshot.track_index, 1);
+    }
+
+    #[tokio::test]
+    async fn given_no_listeners_when_tick_then_encoding_always_active() {
+        let listeners = Arc::new(AtomicUsize::new(0));
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners);
+        let mut snapshot_rx = director.snapshot_tx.subscribe();
+
+        director.tick();
+
+        let _ = timeout(Duration::from_millis(200), snapshot_rx.changed())
+            .await
+            .expect("expected tick to publish snapshot")
+            .expect("expected watch receiver to stay open");
+        let snapshot = snapshot_rx.borrow().clone();
+        assert!(
+            snapshot.is_encoding_active,
+            "encoding should stay active even with zero listeners"
+        );
+    }
+
+    #[tokio::test]
+    async fn given_listeners_disconnect_when_tick_then_encoding_stays_active() {
+        let listeners = Arc::new(AtomicUsize::new(1));
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners.clone());
+
+        director.tick();
+        assert!(
+            director.current_snapshot().is_encoding_active,
+            "encoding should be active with connected listeners"
+        );
+
+        listeners.store(0, Ordering::SeqCst);
+        director.tick();
+
+        let snapshot = director.current_snapshot();
+        assert!(
+            snapshot.is_encoding_active,
+            "encoding should remain active after listeners disconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn given_zero_listeners_when_track_advances_then_snapshot_still_published() {
+        let listeners = Arc::new(AtomicUsize::new(0));
+        let mut director =
+            PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 10)], listeners);
+        director.track_started_at = Instant::now() - Duration::from_millis(1100);
+        let mut snapshot_rx = director.snapshot_tx.subscribe();
+
+        director.tick();
+
+        let _ = timeout(Duration::from_millis(200), snapshot_rx.changed())
+            .await
+            .expect("expected tick to publish advanced track snapshot")
+            .expect("expected watch receiver to stay open");
+        let snapshot = snapshot_rx.borrow().clone();
+
+        assert_eq!(snapshot.track_path, PathBuf::from("b.mp3"));
+        assert_eq!(snapshot.track_index, 1);
+        assert!(
+            snapshot.is_encoding_active,
+            "encoding should remain active while publishing snapshots with zero listeners"
+        );
     }
 }
