@@ -16,7 +16,7 @@ use crate::playback_director::TimelineSnapshot;
 const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
 const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
 const INITIAL_BACKOFF_MS: u64 = 1000;
-const MAX_BACKOFF_MS: u64 = 30_000;
+const MAX_BACKOFF_MS: u64 = 5_000;
 #[allow(dead_code)]
 const IDLE_GRACE_PERIOD_SECS: u64 = 60;
 
@@ -423,6 +423,10 @@ impl FFmpegProcessor {
                                 if let Some(process) = current_process.take() {
                                     process.terminate();
                                 }
+                                // Reset consecutive failures on generation change
+                                if next_snapshot.generation != current_snapshot.generation {
+                                    consecutive_failures = 0;
+                                }
                             }
 
                             current_snapshot = next_snapshot;
@@ -499,7 +503,7 @@ impl FFmpegProcessor {
                         Err(e) => {
                             let error_message = e.to_string();
                             if error_message.contains("non-zero status") {
-                                debug!(
+                                error!(
                                     "FFmpeg process failed for timeline track {:?}: {}",
                                     current_snapshot.track_path, error_message
                                 );
@@ -718,12 +722,12 @@ mod tests {
 
     #[test]
     fn given_many_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
-        assert_eq!(calculate_backoff_ms(100), 30_000);
+        assert_eq!(calculate_backoff_ms(100), 5_000);
     }
 
     #[test]
     fn given_max_u32_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
-        assert_eq!(calculate_backoff_ms(u32::MAX), 30_000);
+        assert_eq!(calculate_backoff_ms(u32::MAX), 5_000);
     }
 
     #[test]
