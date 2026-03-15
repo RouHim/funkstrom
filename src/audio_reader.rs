@@ -79,10 +79,7 @@ impl AudioReader {
                 TrackInfo {
                     path: PathBuf::from(t.file_path),
                     duration_secs: t.duration_seconds.unwrap_or_else(|| {
-                        warn!(
-                            "Track {:?} has no duration, using 180s fallback",
-                            file_path
-                        );
+                        warn!("Track {:?} has no duration, using 180s fallback", file_path);
                         180
                     }),
                     title: Some(t.title),
@@ -251,7 +248,10 @@ impl AudioReader {
             .map(|path| {
                 let key = path.to_string_lossy().to_string();
                 let duration_secs = duration_lookup.get(&key).copied().unwrap_or_else(|| {
-                    warn!("Track {:?} has no known duration, using {}s fallback", path, fallback);
+                    warn!(
+                        "Track {:?} has no known duration, using {}s fallback",
+                        path, fallback
+                    );
                     fallback
                 });
                 TrackInfo {

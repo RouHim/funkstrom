@@ -1,6 +1,4 @@
 #[allow(dead_code)]
-mod audio_buffer;
-#[allow(dead_code)]
 mod audio_metadata;
 mod audio_processor;
 mod audio_reader;
@@ -40,10 +38,7 @@ use tokio::task::JoinHandle;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-type AudioPipeline = (
-    Vec<StreamPipeline>,
-    watch::Receiver<TimelineSnapshot>,
-);
+type AudioPipeline = (Vec<StreamPipeline>, watch::Receiver<TimelineSnapshot>);
 
 struct StreamPipeline {
     name: String,
@@ -273,7 +268,11 @@ fn setup_audio_pipeline(
             .subscribe();
 
         let (audio_tx, audio_rx) = unbounded();
-        audio_processor.start_timeline_streaming_service(timeline_rx_stream, audio_tx, is_paused.clone());
+        audio_processor.start_timeline_streaming_service(
+            timeline_rx_stream,
+            audio_tx,
+            is_paused.clone(),
+        );
 
         stream_pipelines.push(StreamPipeline {
             name: name.clone(),
@@ -308,15 +307,13 @@ fn start_buffer_writer(
             })
             .await
             {
-                Ok(Ok(audio_data)) => {
-                    match stream_buffer.write() {
-                        Ok(mut buffer) => buffer.push(audio_data.data),
-                        Err(e) => {
-                            log::error!("Failed to lock fanout buffer for write: {}", e);
-                            break;
-                        }
+                Ok(Ok(audio_data)) => match stream_buffer.write() {
+                    Ok(mut buffer) => buffer.push(audio_data.data),
+                    Err(e) => {
+                        log::error!("Failed to lock fanout buffer for write: {}", e);
+                        break;
                     }
-                }
+                },
                 Ok(Err(e)) => {
                     log::error!("Failed to receive audio data: {}", e);
                     break;

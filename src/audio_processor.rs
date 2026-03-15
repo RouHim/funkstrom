@@ -254,9 +254,9 @@ impl FFmpegProcessor {
 
         let mut cmd = Command::new(&self.ffmpeg_path);
         cmd.args(&ffmpeg_args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
         debug!("FFmpeg command: {:?}", cmd);
 
@@ -413,7 +413,8 @@ impl FFmpegProcessor {
                     match timeline_rx.changed().await {
                         Ok(()) => {
                             let next_snapshot = timeline_rx.borrow_and_update().clone();
-                            let should_restart = next_snapshot.generation != current_snapshot.generation
+                            let should_restart = next_snapshot.generation
+                                != current_snapshot.generation
                                 || next_snapshot.track_path != current_snapshot.track_path
                                 || next_snapshot.is_encoding_active
                                     != current_snapshot.is_encoding_active;
@@ -619,8 +620,8 @@ pub struct AudioChunk {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use std::path::Path;
+    use std::path::PathBuf;
 
     #[test]
     fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
@@ -809,6 +810,8 @@ mod tests {
     fn given_http_and_https_inputs_when_checking_is_url_then_detects_both_protocols() {
         assert!(is_url_input("http://example.com/stream.mp3"));
         assert!(is_url_input("https://example.com/stream.mp3"));
-        assert!(!is_url_input(Path::new("/tmp/song.mp3").to_str().unwrap_or_default()));
+        assert!(!is_url_input(
+            Path::new("/tmp/song.mp3").to_str().unwrap_or_default()
+        ));
     }
 }
