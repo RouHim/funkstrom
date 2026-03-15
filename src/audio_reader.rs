@@ -1,49 +1,31 @@
 use crate::audio_metadata::TrackMetadata;
 use crate::hearthis_client::{HearthisClient, HearthisTrack};
 use crate::library_db::LibraryDatabase;
-use crate::playback_director::TrackInfo;
+use crate::playback_director::{PlaybackDirector, TrackInfo};
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
-use crossbeam_channel::{bounded, Receiver};
-use log::{debug, error, info, warn};
+use crossbeam_channel::{Receiver, TryRecvError};
+use log::{error, info, warn};
 use rand::prelude::*;
 use rand::rngs::StdRng;
-use std::collections::VecDeque;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use tokio::task::JoinHandle;
 
-// Constants for audio reader configuration
-const TRACK_BUFFER_SIZE: usize = 2; // Number of tracks to buffer ahead
-const SCHEDULE_CHECK_INTERVAL_MS: u64 = 100; // How often to check for schedule commands
+const SCHEDULE_CHECK_INTERVAL_MS: u64 = 100;
 
-#[derive(Debug, Clone)]
-enum PlaylistSource {
-    Library,
-    Scheduled { end_time: std::time::Instant },
-}
-
-// Struct to track pending liveset fetch requests
-#[derive(Debug)]
 struct PendingLiveset {
     name: String,
     duration: Duration,
 }
 
-fn shuffle_playlist(playlist: &mut VecDeque<PathBuf>, seed: u64) {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut playlist_vec: Vec<_> = playlist.drain(..).collect();
-    playlist_vec.shuffle(&mut rng);
-    *playlist = playlist_vec.into_iter().collect();
-}
-
 pub struct AudioReader {
     library_shuffle: bool,
+    #[allow(dead_code)]
     library_repeat: bool,
-    playlist: VecDeque<PathBuf>,
-    current_index: usize,
     current_metadata: Arc<Mutex<TrackMetadata>>,
-    playlist_source: PlaylistSource,
     db: LibraryDatabase,
     shuffle_seed: u64,
 }
@@ -65,25 +47,13 @@ impl AudioReader {
 
         let shuffle_seed = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
-
-        let mut playlist: VecDeque<PathBuf> = tracks
-            .into_iter()
-            .map(|t| PathBuf::from(t.file_path))
-            .collect();
-
-        if shuffle {
-            shuffle_playlist(&mut playlist, shuffle_seed);
-        }
 
         Ok(Self {
             library_shuffle: shuffle,
             library_repeat: repeat,
-            playlist,
-            current_index: 0,
             current_metadata: Arc::new(Mutex::new(TrackMetadata::default())),
-            playlist_source: PlaylistSource::Library,
             db,
             shuffle_seed,
         })
@@ -128,246 +98,173 @@ impl AudioReader {
         playlist
     }
 
-    pub fn next_track(&mut self) -> Option<PathBuf> {
-        if self.playlist.is_empty() {
-            return None;
-        }
-
-        let track = self.playlist.get(self.current_index).cloned();
-
-        // Extract and store metadata for current track
-        if let Some(ref track_path) = track {
-            let metadata = TrackMetadata::from_file(track_path);
-            if let Ok(mut current) = self.current_metadata.lock() {
-                *current = metadata;
-            }
-        }
-
-        self.current_index += 1;
-
-        if self.current_index >= self.playlist.len() {
-            match &self.playlist_source {
-                PlaylistSource::Library => {
-                    if self.library_repeat {
-                        self.current_index = 0;
-                        if self.library_shuffle {
-                            shuffle_playlist(&mut self.playlist, self.shuffle_seed);
-                        }
-                    } else {
-                        return None;
-                    }
-                }
-                PlaylistSource::Scheduled { end_time } => {
-                    if std::time::Instant::now() >= *end_time {
-                        info!("Scheduled program ended, returning to library");
-                        self.return_to_library();
-                        return self.next_track();
-                    } else {
-                        self.current_index = 0;
-                    }
-                }
-            }
-        }
-
-        track
-    }
-
-    pub fn switch_to_scheduled_playlist(
-        &mut self,
-        name: String,
-        tracks: Vec<PathBuf>,
-        duration: Duration,
-    ) {
-        info!(
-            "Switching to scheduled playlist '{}' with {} tracks",
-            name,
-            tracks.len()
-        );
-
-        self.playlist = tracks.into_iter().collect();
-        self.current_index = 0;
-
-        let duration_std = std::time::Duration::from_secs(duration.num_seconds() as u64);
-        let end_time = std::time::Instant::now() + duration_std;
-
-        self.playlist_source = PlaylistSource::Scheduled { end_time };
-    }
-
-    pub fn return_to_library(&mut self) {
-        info!("Returning to library playlist");
-        self.playlist.clear();
-
-        match self.db.get_all_tracks() {
-            Ok(tracks) => {
-                if !tracks.is_empty() {
-                    self.playlist = tracks
-                        .into_iter()
-                        .map(|t| PathBuf::from(t.file_path))
-                        .collect();
-
-                    if self.library_shuffle {
-                        shuffle_playlist(&mut self.playlist, self.shuffle_seed);
-                    }
-
-                    self.current_index = 0;
-                    self.playlist_source = PlaylistSource::Library;
-                } else {
-                    error!("No tracks found in database when returning to library");
-                }
-            }
-            Err(e) => {
-                error!("Failed to load tracks from database: {}", e);
-            }
-        }
-    }
-
-    pub fn start_playlist_service(
-        mut self,
+    pub fn start_schedule_command_service(
+        self,
         schedule_command_rx: Option<Receiver<PlaylistCommand>>,
-    ) -> Receiver<PathBuf> {
-        // Use bounded channel to keep tracks buffered ahead
-        // This provides backpressure and prevents flooding the channel
-        let (track_tx, track_rx) = bounded::<PathBuf>(TRACK_BUFFER_SIZE);
-
-        // Channel for receiving fetched livesets from async tasks
-        let (liveset_tx, liveset_rx) =
-            bounded::<(PendingLiveset, Result<HearthisTrack, String>)>(1);
-
+        director: Arc<Mutex<PlaybackDirector>>,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            loop {
-                // Check for schedule commands
-                if let Some(ref cmd_rx) = schedule_command_rx {
-                    match cmd_rx.try_recv() {
-                        Ok(PlaylistCommand::SwitchToPlaylist {
-                            name,
-                            tracks,
-                            duration,
-                        }) => {
-                            self.switch_to_scheduled_playlist(name, tracks, duration);
-                        }
-                        Ok(PlaylistCommand::SwitchToLiveset {
-                            name,
-                            genres,
-                            duration,
-                        }) => {
-                            // Fetch liveset from hearthis.at API asynchronously
-                            info!(
-                                "Fetching liveset for program '{}' (genres: {:?})",
-                                name, genres
-                            );
+            let Some(command_rx) = schedule_command_rx else {
+                return;
+            };
 
-                            // Spawn async task to fetch liveset and send result back via channel
-                            let tx = liveset_tx.clone();
-                            let pending = PendingLiveset {
-                                name: name.clone(),
-                                duration,
+            let reader = self;
+            let (liveset_tx, liveset_rx) =
+                crossbeam_channel::bounded::<(PendingLiveset, Result<HearthisTrack, String>)>(1);
+
+            loop {
+                match command_rx.try_recv() {
+                    Ok(PlaylistCommand::SwitchToPlaylist {
+                        name,
+                        tracks,
+                        duration,
+                    }) => {
+                        info!(
+                            "Applying scheduled playlist '{}' with {} tracks",
+                            name,
+                            tracks.len()
+                        );
+                        let fallback_duration = duration.num_seconds().max(1);
+                        let playlist =
+                            reader.build_track_infos_for_paths(&tracks, Some(fallback_duration));
+                        if playlist.is_empty() {
+                            warn!(
+                                "Scheduled playlist '{}' resolved to 0 tracks, keeping current playlist",
+                                name
+                            );
+                        } else {
+                            if let Ok(mut guard) = director.lock() {
+                                guard.replace_playlist(playlist);
+                            }
+                        }
+                    }
+                    Ok(PlaylistCommand::SwitchToLiveset {
+                        name,
+                        genres,
+                        duration,
+                    }) => {
+                        info!(
+                            "Fetching liveset for program '{}' (genres: {:?})",
+                            name, genres
+                        );
+
+                        let tx = liveset_tx.clone();
+                        let pending = PendingLiveset {
+                            name: name.clone(),
+                            duration,
+                        };
+
+                        tokio::spawn(async move {
+                            let result = match HearthisClient::new() {
+                                Ok(client) => match client.get_random_liveset(&genres).await {
+                                    Ok(track) => {
+                                        info!(
+                                            "Fetched liveset: '{}' by {} ({})",
+                                            track.title, track.user.username, track.genre
+                                        );
+                                        Ok(track)
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to fetch liveset: {}", e);
+                                        Err(format!("API error: {}", e))
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Failed to create hearthis client: {}", e);
+                                    Err(format!("Client error: {}", e))
+                                }
                             };
 
-                            tokio::spawn(async move {
-                                let result = match HearthisClient::new() {
-                                    Ok(client) => match client.get_random_liveset(&genres).await {
-                                        Ok(track) => {
-                                            info!(
-                                                "Fetched liveset: '{}' by {} ({})",
-                                                track.title, track.user.username, track.genre
-                                            );
-                                            Ok(track)
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to fetch liveset: {}", e);
-                                            Err(format!("API error: {}", e))
-                                        }
-                                    },
-                                    Err(e) => {
-                                        error!("Failed to create hearthis client: {}", e);
-                                        Err(format!("Client error: {}", e))
-                                    }
-                                };
-
-                                // Send result back to main loop
-                                if tx.send((pending, result)).is_err() {
-                                    error!("Failed to send liveset result - receiver dropped");
-                                }
-                            });
-                        }
-                        Ok(PlaylistCommand::ReturnToLibrary) => {
-                            self.return_to_library();
-                        }
-                        Err(_) => {}
+                            if tx.send((pending, result)).is_err() {
+                                error!("Failed to send liveset result - receiver dropped");
+                            }
+                        });
                     }
-                }
-
-                // Check for liveset fetch results
-                if let Ok((pending, result)) = liveset_rx.try_recv() {
-                    match result {
-                        Ok(track) => {
-                            info!(
-                                "Liveset fetched successfully for program '{}': '{}' by {}",
-                                pending.name, track.title, track.user.username
-                            );
-
-                            // Switch to the liveset by treating the stream URL as a track
-                            let liveset_url = PathBuf::from(track.stream_url);
-                            self.switch_to_scheduled_playlist(
-                                pending.name,
-                                vec![liveset_url],
-                                pending.duration,
-                            );
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to fetch liveset for program '{}': {}. Continuing with library.",
-                                pending.name, e
-                            );
-                            // Continue with library playback on error
+                    Ok(PlaylistCommand::ReturnToLibrary) => {
+                        info!("Returning to library playlist");
+                        let playlist = reader.build_playlist();
+                        if playlist.is_empty() {
+                            warn!("Library playlist is empty, keeping current playlist");
+                        } else {
+                            if let Ok(mut guard) = director.lock() {
+                                guard.replace_playlist(playlist);
+                            }
                         }
                     }
-                }
-
-                // Get next track
-                if let Some(track) = self.next_track() {
-                    debug!("Next track: {:?}", track);
-
-                    // This will block when channel is full (backpressure)
-                    // Blocking is moved to tokio blocking thread to avoid blocking async runtime
-                    let result = tokio::task::spawn_blocking({
-                        let track_tx = track_tx.clone();
-                        let track = track.clone();
-                        move || track_tx.send(track)
-                    })
-                    .await;
-
-                    match result {
-                        Ok(Ok(())) => {
-                            // Track sent successfully
-                        }
-                        Ok(Err(_)) => {
-                            error!("Failed to send track to channel - receiver dropped");
-                            break;
-                        }
-                        Err(e) => {
-                            error!("Task join error: {}", e);
-                            break;
-                        }
-                    }
-                } else {
-                    info!("End of playlist reached");
-                    if !self.library_repeat
-                        && matches!(self.playlist_source, PlaylistSource::Library)
-                    {
+                    Err(TryRecvError::Empty) => {}
+                    Err(TryRecvError::Disconnected) => {
+                        info!("Schedule command channel disconnected, stopping command service");
                         break;
                     }
                 }
 
-                // Small delay to check for schedule commands periodically
+                if let Ok((pending, result)) = liveset_rx.try_recv() {
+                    match result {
+                        Ok(track) => {
+                            let liveset_duration = pending.duration.num_seconds().max(1);
+                            let playlist = vec![TrackInfo {
+                                path: PathBuf::from(track.stream_url),
+                                duration_secs: liveset_duration,
+                            }];
+
+                            info!(
+                                "Applying liveset for program '{}': '{}' by {}",
+                                pending.name, track.title, track.user.username
+                            );
+                            if let Ok(mut guard) = director.lock() {
+                                guard.replace_playlist(playlist);
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to fetch liveset for program '{}': {}. Continuing with current playlist.",
+                                pending.name, e
+                            );
+                        }
+                    }
+                }
+
                 tokio::time::sleep(tokio::time::Duration::from_millis(
                     SCHEDULE_CHECK_INTERVAL_MS,
                 ))
                 .await;
             }
-        });
+        })
+    }
 
-        track_rx
+    fn build_track_infos_for_paths(
+        &self,
+        tracks: &[PathBuf],
+        fallback_duration: Option<i64>,
+    ) -> Vec<TrackInfo> {
+        let duration_lookup = self.build_duration_lookup();
+        let fallback = fallback_duration.unwrap_or(180);
+
+        tracks
+            .iter()
+            .cloned()
+            .map(|path| {
+                let key = path.to_string_lossy().to_string();
+                let duration_secs = duration_lookup.get(&key).copied().unwrap_or_else(|| {
+                    warn!("Track {:?} has no known duration, using {}s fallback", path, fallback);
+                    fallback
+                });
+                TrackInfo { path, duration_secs }
+            })
+            .collect()
+    }
+
+    fn build_duration_lookup(&self) -> HashMap<String, i64> {
+        match self.db.get_all_tracks() {
+            Ok(tracks) => tracks
+                .into_iter()
+                .map(|track| (track.file_path, track.duration_seconds.unwrap_or(180)))
+                .collect(),
+            Err(e) => {
+                error!("Failed to load durations from database: {}", e);
+                HashMap::new()
+            }
+        }
     }
 }
 
@@ -377,7 +274,9 @@ mod tests {
     use crate::library_db::{LibraryDatabase, TrackRecord};
     use tempfile::NamedTempFile;
 
-    fn create_test_db_with_tracks(tracks: Vec<(&str, Option<i64>)>) -> (LibraryDatabase, NamedTempFile) {
+    fn create_test_db_with_tracks(
+        tracks: Vec<(&str, Option<i64>)>,
+    ) -> (LibraryDatabase, NamedTempFile) {
         let temp_file = NamedTempFile::new().unwrap();
         let db_path = temp_file.path().to_str().unwrap();
         let db = LibraryDatabase::new(db_path).unwrap();
@@ -483,4 +382,3 @@ mod tests {
         }
     }
 }
-

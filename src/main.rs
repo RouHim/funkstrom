@@ -1,4 +1,6 @@
+#[allow(dead_code)]
 mod audio_buffer;
+#[allow(dead_code)]
 mod audio_metadata;
 mod audio_processor;
 mod audio_reader;
@@ -15,15 +17,16 @@ mod schedule_engine;
 mod server_icecast;
 mod server_swagger;
 
-use audio_buffer::StreamBuffer;
 use audio_metadata::TrackMetadata;
 use audio_processor::{AudioChunk, FFmpegProcessor};
 use audio_reader::AudioReader;
 use cli::get_config_path;
 use config::Config;
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{unbounded, Receiver};
+use fanout_buffer::{FanoutBuffer, SharedFanoutBuffer};
 use library_db::LibraryDatabase;
 use library_scanner::LibraryScanner;
+use playback_director::PlaybackDirector;
 use schedule_engine::{PlaylistCommand, ScheduleEngine};
 use server_icecast::{IcecastServer, StreamBufferEntry};
 use std::path::PathBuf;
@@ -39,13 +42,13 @@ use tokio::task::JoinHandle;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 type AudioPipeline = (
-    Receiver<PathBuf>,
     Vec<StreamPipeline>,
     Arc<Mutex<TrackMetadata>>,
 );
 
 struct StreamPipeline {
     name: String,
+    buffer: SharedFanoutBuffer,
     receiver: Receiver<AudioChunk>,
     bitrate: u32,
     format: String,
@@ -68,23 +71,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Initialize components
     let (db, scanner) = initialize_library(&config)?;
     let schedule_rx = setup_schedule_engine(&config);
-    let (_track_rx, stream_pipelines, current_metadata) =
-        setup_audio_pipeline(&config, db, schedule_rx)?;
+    let (stream_pipelines, current_metadata) = setup_audio_pipeline(&config, db, schedule_rx)?;
 
     // Set up streaming buffers and buffer writers for each stream
     let mut buffer_writer_handles = Vec::new();
     let mut stream_buffers = Vec::new();
 
     for pipeline in stream_pipelines {
-        let stream_buffer = StreamBuffer::new(1000, 50 * 1024 * 1024);
-        stream_buffer.start();
-
-        let handle = start_buffer_writer(&stream_buffer, pipeline.receiver);
+        let handle = start_buffer_writer(pipeline.buffer.clone(), pipeline.receiver);
         buffer_writer_handles.push(handle);
 
         stream_buffers.push((
             pipeline.name,
-            stream_buffer,
+            pipeline.buffer,
             pipeline.bitrate,
             pipeline.format.clone(),
             pipeline.listeners,
@@ -204,7 +203,31 @@ fn setup_audio_pipeline(
         AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
 
     let current_metadata = audio_reader.get_current_metadata();
-    let track_rx = audio_reader.start_playlist_service(schedule_rx);
+    let initial_playlist = audio_reader.build_playlist();
+
+    if initial_playlist.is_empty() {
+        return Err("No tracks found for initial playlist".into());
+    }
+
+    let listener_count = Arc::new(AtomicUsize::new(0));
+    let director = Arc::new(Mutex::new(PlaybackDirector::new(
+        initial_playlist,
+        listener_count.clone(),
+    )));
+
+    {
+        let director = director.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok(mut guard) = director.lock() {
+                    guard.tick();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        });
+    }
+
+    audio_reader.start_schedule_command_service(schedule_rx, director.clone());
 
     // Create a processor for each enabled stream
     let mut stream_pipelines = Vec::new();
@@ -231,22 +254,25 @@ fn setup_audio_pipeline(
             stream_config.format.clone(),
         );
 
-        let listeners = Arc::new(AtomicUsize::new(0));
+        let listeners = listener_count.clone();
         let notify = Arc::new(Notify::new());
         let is_paused = Arc::new(AtomicBool::new(false));
+        let buffer = FanoutBuffer::new(1000, 50 * 1024 * 1024).shared();
 
         audio_processor.check_ffmpeg_available()?;
 
-        // Each processor gets a clone of the track receiver
-        let audio_rx = audio_processor.start_streaming_service(
-            track_rx.clone(),
-            listeners.clone(),
-            notify.clone(),
-            is_paused.clone(),
-        );
+        let timeline_rx = director
+            .lock()
+            .map_err(|e| format!("PlaybackDirector lock poisoned: {}", e))?
+            .snapshot_tx
+            .subscribe();
+
+        let (audio_tx, audio_rx) = unbounded();
+        audio_processor.start_timeline_streaming_service(timeline_rx, audio_tx, is_paused.clone());
 
         stream_pipelines.push(StreamPipeline {
             name: name.clone(),
+            buffer,
             receiver: audio_rx,
             bitrate: stream_config.bitrate,
             format: stream_config.format.clone(),
@@ -262,15 +288,13 @@ fn setup_audio_pipeline(
 
     log::info!("Initialized {} stream(s)", stream_pipelines.len());
 
-    Ok((track_rx, stream_pipelines, current_metadata))
+    Ok((stream_pipelines, current_metadata))
 }
 
 fn start_buffer_writer(
-    stream_buffer: &StreamBuffer,
+    stream_buffer: SharedFanoutBuffer,
     audio_rx: Receiver<AudioChunk>,
 ) -> JoinHandle<()> {
-    let buffer_input_tx = stream_buffer.get_input_sender();
-
     tokio::spawn(async move {
         loop {
             match tokio::task::spawn_blocking({
@@ -280,9 +304,12 @@ fn start_buffer_writer(
             .await
             {
                 Ok(Ok(audio_data)) => {
-                    if let Err(e) = buffer_input_tx.send(audio_data.data) {
-                        log::error!("Failed to send audio data to buffer: {}", e);
-                        break;
+                    match stream_buffer.write() {
+                        Ok(mut buffer) => buffer.push(audio_data.data),
+                        Err(e) => {
+                            log::error!("Failed to lock fanout buffer for write: {}", e);
+                            break;
+                        }
                     }
                 }
                 Ok(Err(e)) => {

@@ -1,5 +1,5 @@
-use crate::audio_buffer::StreamBuffer;
 use crate::audio_metadata::TrackMetadata;
+use crate::fanout_buffer::SharedFanoutBuffer;
 use crate::server_swagger;
 use minijinja::Environment;
 use serde::Serialize;
@@ -78,7 +78,7 @@ impl Drop for ListenerGuard {
 // Context for handling stream requests
 #[derive(Clone)]
 struct StreamContext {
-    buffer: StreamBuffer,
+    buffer: SharedFanoutBuffer,
     bitrate: u32,
     format: String,
     station_name: String,
@@ -105,7 +105,7 @@ pub struct IcecastServer {
 #[derive(Clone)]
 struct StreamEndpoint {
     name: String,
-    buffer: StreamBuffer,
+    buffer: SharedFanoutBuffer,
     bitrate: u32,
     format: String,
     listeners: Arc<AtomicUsize>,
@@ -115,7 +115,7 @@ struct StreamEndpoint {
 
 pub type StreamBufferEntry = (
     String,
-    StreamBuffer,
+    SharedFanoutBuffer,
     u32,
     String,
     Arc<AtomicUsize>,
@@ -274,11 +274,26 @@ impl IcecastServer {
 
         tokio::spawn(async move {
             let _guard = ListenerGuard::new(listeners, notify);
+            let mut cursor = match buffer.write() {
+                Ok(guard) => guard.new_cursor(),
+                Err(e) => {
+                    log::error!("Failed to initialize listener cursor: {}", e);
+                    return;
+                }
+            };
             let mut last_data_time = Instant::now();
             let timeout_duration = Duration::from_secs(30);
 
             loop {
-                if let Some(chunk) = buffer.read_chunk(8192) {
+                let chunk = match buffer.read() {
+                    Ok(guard) => guard.read_from_cursor(&mut cursor),
+                    Err(e) => {
+                        log::error!("Failed to lock fanout buffer for read: {}", e);
+                        break;
+                    }
+                };
+
+                if let Some(chunk) = chunk {
                     if tx.send(Ok::<_, warp::Error>(chunk)).is_err() {
                         log::info!("Client disconnected");
                         break;
@@ -334,8 +349,13 @@ impl IcecastServer {
             .streams
             .iter()
             .map(|stream| {
-                let (chunks, bytes) = stream.buffer.buffer_info();
-                let is_running = stream.buffer.is_running();
+                let (chunks, bytes, is_running) = match stream.buffer.read() {
+                    Ok(guard) => (guard.ring.len(), guard.current_bytes, true),
+                    Err(e) => {
+                        log::error!("Failed to read buffer status: {}", e);
+                        (0, 0, false)
+                    }
+                };
                 let is_paused = stream.is_paused.load(Ordering::SeqCst);
                 let listeners = stream.listeners.load(Ordering::SeqCst);
 
