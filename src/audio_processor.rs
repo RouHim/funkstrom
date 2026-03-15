@@ -624,8 +624,46 @@ pub struct AudioChunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio_metadata::TrackMetadata;
     use std::path::Path;
     use std::path::PathBuf;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::tempdir;
+    use tokio::sync::watch;
+
+    fn snapshot_with(track: &str, generation: u64, is_encoding_active: bool) -> TimelineSnapshot {
+        TimelineSnapshot {
+            track_path: PathBuf::from(track),
+            track_index: 0,
+            elapsed_in_track_secs: 0.0,
+            generation,
+            is_encoding_active,
+            current_metadata: TrackMetadata::default(),
+        }
+    }
+
+    fn create_fake_ffmpeg_script(script_body: &str) -> String {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().expect("temporary directory should be created");
+        let path = dir.path().join("fake-ffmpeg.sh");
+
+        fs::write(&path, script_body).expect("fake ffmpeg script should be written");
+
+        let mut permissions = fs::metadata(&path)
+            .expect("fake ffmpeg script metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&path, permissions)
+            .expect("fake ffmpeg script should be marked executable");
+
+        let script_path = path.to_string_lossy().to_string();
+        std::mem::forget(dir);
+        script_path
+    }
 
     #[test]
     fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
@@ -817,5 +855,105 @@ mod tests {
         assert!(!is_url_input(
             Path::new("/tmp/song.mp3").to_str().unwrap_or_default()
         ));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn given_snapshot_without_encoding_active_flag_when_processing_then_ffmpeg_decision_not_gated(
+    ) {
+        let fake_ffmpeg_path = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+printf 'audio'
+exit 0
+"#,
+        );
+
+        let processor = FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) = watch::channel(snapshot_with(
+            "https://example.com/ungated-stream",
+            0,
+            false,
+        ));
+        let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
+        let is_paused = Arc::new(AtomicBool::new(false));
+
+        processor.start_timeline_streaming_service(timeline_rx, chunk_tx, is_paused);
+
+        let recv_result = chunk_rx.recv_timeout(Duration::from_millis(300));
+        drop(timeline_tx);
+
+        assert!(
+            recv_result.is_ok(),
+            "expected FFmpeg spawn/streaming decision to be independent from is_encoding_active"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn given_ffmpeg_fails_when_generation_changes_then_consecutive_failures_resets() {
+        let fake_ffmpeg_path = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+for arg in "$@"; do
+  case "$arg" in
+    *ok-stream*)
+      printf 'audio'
+      exit 0
+      ;;
+  esac
+done
+exit 1
+"#,
+        );
+
+        let processor = FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) = watch::channel(snapshot_with(
+            "https://example.com/failing-stream",
+            0,
+            true,
+        ));
+        let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
+        let is_paused = Arc::new(AtomicBool::new(false));
+
+        processor.start_timeline_streaming_service(timeline_rx, chunk_tx, is_paused);
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        timeline_tx
+            .send(snapshot_with("", 1, true))
+            .expect("first generation change should be delivered");
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        timeline_tx
+            .send(snapshot_with("https://example.com/ok-stream", 2, true))
+            .expect("second generation change should be delivered");
+
+        let recv_result = chunk_rx.recv_timeout(Duration::from_millis(350));
+        drop(timeline_tx);
+
+        assert!(
+            recv_result.is_ok(),
+            "expected generation change to reset failure backoff so next track starts quickly"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn given_is_encoding_active_false_when_processing_then_is_paused_never_true() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) = watch::channel(snapshot_with(
+            "https://example.com/stream",
+            0,
+            false,
+        ));
+        let (chunk_tx, _chunk_rx) = unbounded::<AudioChunk>();
+        let is_paused = Arc::new(AtomicBool::new(false));
+
+        processor.start_timeline_streaming_service(timeline_rx, chunk_tx, Arc::clone(&is_paused));
+
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        drop(timeline_tx);
+
+        assert!(
+            !is_paused.load(Ordering::SeqCst),
+            "expected audio processor to never enter paused state based on is_encoding_active"
+        );
     }
 }
