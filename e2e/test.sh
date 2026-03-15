@@ -170,6 +170,59 @@ else
     ((FAIL++))
 fi
 
+# Test 13: High-quality stream config is present in status
+echo "Test 13: High-quality stream config is present in status"
+HIGH_STREAM=$(curl -s "${BASE_URL}/status" | jq -r '.streams[] | select(.name == "high") | .name')
+if [ "$HIGH_STREAM" = "high" ]; then
+    echo "  ✓ PASS"
+    ((PASS++))
+else
+    echo "  ✗ FAIL (high stream not found in status)"
+    ((FAIL++))
+fi
+
+# Test 14: All configured streams show status online
+echo "Test 14: All configured streams show status online"
+ALL_ONLINE=true
+STREAM_STATUSES=$(curl -s "${BASE_URL}/status" | jq -r '.streams[] | "\(.name)=\(.status)"')
+for ENTRY in $STREAM_STATUSES; do
+    S_NAME="${ENTRY%%=*}"
+    S_STATUS="${ENTRY##*=}"
+    if [ "$S_STATUS" != "online" ]; then
+        echo "  ✗ FAIL (stream $S_NAME has status: $S_STATUS)"
+        ALL_ONLINE=false
+        break
+    fi
+done
+if [ "$ALL_ONLINE" = true ]; then
+    echo "  ✓ PASS (all streams online)"
+    ((PASS++))
+else
+    ((FAIL++))
+fi
+
+# Test 15: High-quality stream endpoint responds
+echo "Test 15: High-quality stream endpoint responds"
+HTTP_CODE=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/high")
+if [ "$HTTP_CODE" = "200" ]; then
+    echo "  ✓ PASS (HTTP $HTTP_CODE)"
+    ((PASS++))
+else
+    echo "  ✗ FAIL (HTTP $HTTP_CODE)"
+    ((FAIL++))
+fi
+
+# Test 16: High-quality stream delivers audio data
+echo "Test 16: High-quality stream delivers audio data"
+HQ_DATA_SIZE=$(timeout 5 curl -s -N "${BASE_URL}/high" 2>/dev/null | head -c 5000 | wc -c)
+if [ "$HQ_DATA_SIZE" -gt 0 ]; then
+    echo "  ✓ PASS (received ${HQ_DATA_SIZE} bytes)"
+    ((PASS++))
+else
+    echo "  ✗ FAIL (received 0 bytes)"
+    ((FAIL++))
+fi
+
 echo
 echo "=== Results ==="
 echo "Passed: $PASS"
