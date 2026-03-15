@@ -85,7 +85,7 @@ echo "Test 3: Metadata reflects timeline advancement"
 start_server
 
 # Get initial metadata
-curl -s "${BASE_URL}/current" > /tmp/meta1.json 2>/dev/null
+timeout 5 curl -s "${BASE_URL}/current" > /tmp/meta1.json 2>/dev/null || true
 INITIAL_VALID=$(jq -e '.file_path' /tmp/meta1.json > /dev/null 2>&1 && echo "yes" || echo "no")
 
 # Wait 70 seconds (timeline should advance)
@@ -93,7 +93,7 @@ echo "  Waiting 70 seconds for timeline advancement..."
 sleep 70
 
 # Get metadata after idle period
-curl -s "${BASE_URL}/current" > /tmp/meta2.json 2>/dev/null
+timeout 5 curl -s "${BASE_URL}/current" > /tmp/meta2.json 2>/dev/null || true
 FINAL_VALID=$(jq -e '.file_path' /tmp/meta2.json > /dev/null 2>&1 && echo "yes" || echo "no")
 
 # Check if metadata changed or is still valid JSON
