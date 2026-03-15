@@ -203,7 +203,7 @@ fi
 
 # Test 15: High-quality stream endpoint responds
 echo "Test 15: High-quality stream endpoint responds"
-HTTP_CODE=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/high")
+HTTP_CODE=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "${BASE_URL}/high")
 if [ "$HTTP_CODE" = "200" ]; then
     echo "  ✓ PASS (HTTP $HTTP_CODE)"
     ((PASS++))
