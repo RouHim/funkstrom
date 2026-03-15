@@ -558,7 +558,6 @@
 
       function pause() {
         audio.pause();
-        audio.currentTime = 0;
         isPlaying = false;
         playBtn.classList.remove('playing');
         playBtn.setAttribute('aria-label', 'Play');
@@ -572,7 +571,6 @@
       streamBtns.forEach(function (btn) {
         btn.addEventListener('click', function () {
           var src = this.getAttribute('data-src');
-          if (isPlaying) { pause(); }
           audio.src = src;
           streamBtns.forEach(function (b) { b.classList.remove('active'); });
           this.classList.add('active');
