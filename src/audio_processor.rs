@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use crossbeam_channel::{unbounded, Receiver};
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use log::{debug, error, info, warn};
 use std::io::ErrorKind;
 use std::io::{BufReader, Read};
@@ -8,7 +8,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
+
+use crate::playback_director::TimelineSnapshot;
 
 // Constants for audio processing configuration
 const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
@@ -62,6 +64,10 @@ fn calculate_backoff_ms(consecutive_failures: u32) -> u64 {
     let backoff =
         INITIAL_BACKOFF_MS.saturating_mul(1u64.wrapping_shl(consecutive_failures.min(15)));
     backoff.min(MAX_BACKOFF_MS)
+}
+
+fn is_url_input(input: &str) -> bool {
+    input.starts_with("http://") || input.starts_with("https://")
 }
 
 pub struct FFmpegProcessor {
@@ -174,41 +180,76 @@ impl FFmpegProcessor {
         self.start_conversion(url)
     }
 
+    #[allow(dead_code)]
+    pub fn start_conversion_with_seek(
+        &self,
+        input: &str,
+        seek_offset_secs: Option<f64>,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
+        self.start_conversion_internal(input, seek_offset_secs)
+    }
+
     fn start_conversion(
         &self,
         input: &str,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
+        self.start_conversion_internal(input, None)
+    }
+
+    fn build_ffmpeg_args(&self, input: &str, seek_offset_secs: Option<f64>) -> Vec<String> {
+        let codec = self.get_codec_for_format(&self.format);
+        let muxer = self.get_muxer_for_format(&self.format);
+
+        let mut args = Vec::new();
+
+        if !is_url_input(input) {
+            if let Some(offset) = seek_offset_secs.filter(|offset| *offset > 0.0) {
+                args.push("-ss".to_string());
+                args.push(offset.to_string());
+            }
+        }
+
+        args.extend([
+            "-re".to_string(),
+            "-i".to_string(),
+            input.to_string(),
+            "-f".to_string(),
+            muxer.to_string(),
+            "-acodec".to_string(),
+            codec.to_string(),
+            "-ab".to_string(),
+            format!("{}k", self.bitrate),
+            "-ar".to_string(),
+            self.sample_rate.to_string(),
+            "-ac".to_string(),
+            self.channels.to_string(),
+            "-loglevel".to_string(),
+            "error".to_string(),
+            "-".to_string(),
+        ]);
+
+        args
+    }
+
+    fn start_conversion_internal(
+        &self,
+        input: &str,
+        seek_offset_secs: Option<f64>,
+    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         debug!("Starting FFmpeg conversion for: {}", input);
 
         // Only check file existence for local files (not URLs)
-        if !input.starts_with("http://") && !input.starts_with("https://") {
+        if !is_url_input(input) {
             let path = Path::new(input);
             if !path.exists() {
                 return Err(format!("Input file does not exist: {}", input).into());
             }
         }
 
-        let codec = self.get_codec_for_format(&self.format);
-        let muxer = self.get_muxer_for_format(&self.format);
+        let ffmpeg_args = self.build_ffmpeg_args(input, seek_offset_secs);
 
         let mut cmd = Command::new(&self.ffmpeg_path);
-        cmd.args([
-            "-i",
-            input,
-            "-f",
-            muxer,
-            "-acodec",
-            codec,
-            "-ab",
-            &format!("{}k", self.bitrate),
-            "-ar",
-            &self.sample_rate.to_string(),
-            "-ac",
-            &self.channels.to_string(),
-            "-loglevel",
-            "error",
-            "-",
-        ])
+        cmd.args(&ffmpeg_args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -349,6 +390,136 @@ impl FFmpegProcessor {
 
         audio_rx
     }
+
+    #[allow(dead_code)]
+    pub fn start_timeline_streaming_service(
+        self,
+        mut timeline_rx: watch::Receiver<TimelineSnapshot>,
+        chunk_tx: Sender<AudioChunk>,
+        is_paused: Arc<AtomicBool>,
+    ) {
+        tokio::spawn(async move {
+            let mut current_process: Option<AudioProcess> = None;
+            let mut current_snapshot = timeline_rx.borrow().clone();
+            let mut consecutive_failures: u32 = 0;
+
+            loop {
+                if timeline_rx.has_changed().unwrap_or(false) {
+                    match timeline_rx.changed().await {
+                        Ok(()) => {
+                            let next_snapshot = timeline_rx.borrow_and_update().clone();
+                            let should_restart = next_snapshot.generation != current_snapshot.generation
+                                || next_snapshot.track_path != current_snapshot.track_path
+                                || next_snapshot.is_encoding_active
+                                    != current_snapshot.is_encoding_active;
+
+                            if should_restart {
+                                if let Some(process) = current_process.take() {
+                                    process.terminate();
+                                }
+                            }
+
+                            current_snapshot = next_snapshot;
+                        }
+                        Err(_) => {
+                            debug!("Timeline sender dropped, stopping timeline streaming service");
+                            break;
+                        }
+                    }
+                }
+
+                if !current_snapshot.is_encoding_active {
+                    is_paused.store(true, Ordering::SeqCst);
+                } else {
+                    is_paused.store(false, Ordering::SeqCst);
+                }
+
+                if current_process.is_none() && current_snapshot.is_encoding_active {
+                    let track = current_snapshot.track_path.clone();
+
+                    if track.as_os_str().is_empty() {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            PROCESS_POLL_INTERVAL_MS,
+                        ))
+                        .await;
+                        continue;
+                    }
+
+                    let track_str = track.to_string_lossy().to_string();
+                    let result = self.start_conversion_with_seek(
+                        &track_str,
+                        Some(current_snapshot.elapsed_in_track_secs),
+                    );
+
+                    match result {
+                        Ok(process) => {
+                            debug!(
+                                "Started timeline processing track: {:?}, generation: {}, seek: {}",
+                                track,
+                                current_snapshot.generation,
+                                current_snapshot.elapsed_in_track_secs
+                            );
+                            current_process = Some(process);
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to start FFmpeg process for timeline track {:?}: {}",
+                                track, e
+                            );
+                            consecutive_failures += 1;
+                        }
+                    }
+                }
+
+                if let Some(ref mut process) = current_process {
+                    match process.read_chunk() {
+                        Ok(Some(chunk)) => {
+                            let audio_chunk = AudioChunk { data: chunk };
+
+                            if chunk_tx.send(audio_chunk).is_err() {
+                                warn!("Failed to send audio chunk - receiver dropped");
+                                break;
+                            }
+                            consecutive_failures = 0;
+                        }
+                        Ok(None) => {
+                            info!(
+                                "Timeline track completed: {:?}, generation: {}",
+                                current_snapshot.track_path, current_snapshot.generation
+                            );
+                            current_process = None;
+                            consecutive_failures = 0;
+                        }
+                        Err(e) => {
+                            let error_message = e.to_string();
+                            if error_message.contains("non-zero status") {
+                                debug!(
+                                    "FFmpeg process failed for timeline track {:?}: {}",
+                                    current_snapshot.track_path, error_message
+                                );
+                            } else {
+                                error!("Error reading from FFmpeg process: {}", error_message);
+                            }
+                            current_process = None;
+                            consecutive_failures += 1;
+                        }
+                    }
+                }
+
+                let delay_ms = if consecutive_failures > 0 {
+                    calculate_backoff_ms(consecutive_failures)
+                } else {
+                    PROCESS_POLL_INTERVAL_MS
+                };
+                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            }
+
+            if let Some(process) = current_process.take() {
+                process.terminate();
+            }
+            is_paused.store(true, Ordering::SeqCst);
+        });
+    }
 }
 
 pub struct AudioProcess {
@@ -424,6 +595,16 @@ impl AudioProcess {
             }
         }
     }
+
+    #[allow(dead_code)]
+    fn terminate(mut self) {
+        if let Err(e) = self.child.kill() {
+            debug!("Unable to kill FFmpeg process cleanly: {}", e);
+        }
+        if let Err(e) = self.child.wait() {
+            debug!("Unable to wait for killed FFmpeg process: {}", e);
+        }
+    }
 }
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
@@ -434,6 +615,7 @@ pub struct AudioChunk {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::path::Path;
 
     #[test]
     fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
@@ -558,5 +740,70 @@ mod tests {
     #[test]
     fn given_idle_grace_period_constant_then_equals_60_seconds() {
         assert_eq!(IDLE_GRACE_PERIOD_SECS, 60);
+    }
+
+    #[test]
+    fn given_local_input_with_seek_when_building_ffmpeg_args_then_places_ss_before_re_and_i() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let args = processor.build_ffmpeg_args("/tmp/song.mp3", Some(12.5));
+
+        let ss_index = args
+            .iter()
+            .position(|arg| arg == "-ss")
+            .expect("-ss must exist for local files with seek");
+        let re_index = args
+            .iter()
+            .position(|arg| arg == "-re")
+            .expect("-re must exist");
+        let i_index = args
+            .iter()
+            .position(|arg| arg == "-i")
+            .expect("-i must exist");
+
+        assert!(ss_index < re_index);
+        assert!(re_index < i_index);
+        assert_eq!(args[ss_index + 1], "12.5");
+    }
+
+    #[test]
+    fn given_url_input_with_seek_when_building_ffmpeg_args_then_omits_ss_and_keeps_re_before_i() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let args = processor.build_ffmpeg_args("https://example.com/stream.mp3", Some(42.0));
+
+        assert!(!args.iter().any(|arg| arg == "-ss"));
+
+        let re_index = args
+            .iter()
+            .position(|arg| arg == "-re")
+            .expect("-re must exist");
+        let i_index = args
+            .iter()
+            .position(|arg| arg == "-i")
+            .expect("-i must exist");
+        assert!(re_index < i_index);
+    }
+
+    #[test]
+    fn given_local_input_without_seek_when_building_ffmpeg_args_then_omits_ss() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let args = processor.build_ffmpeg_args("/tmp/song.mp3", None);
+        assert!(!args.iter().any(|arg| arg == "-ss"));
+    }
+
+    #[test]
+    fn given_zero_or_negative_seek_when_building_ffmpeg_args_then_omits_ss() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let args_zero = processor.build_ffmpeg_args("/tmp/song.mp3", Some(0.0));
+        let args_negative = processor.build_ffmpeg_args("/tmp/song.mp3", Some(-1.0));
+
+        assert!(!args_zero.iter().any(|arg| arg == "-ss"));
+        assert!(!args_negative.iter().any(|arg| arg == "-ss"));
+    }
+
+    #[test]
+    fn given_http_and_https_inputs_when_checking_is_url_then_detects_both_protocols() {
+        assert!(is_url_input("http://example.com/stream.mp3"));
+        assert!(is_url_input("https://example.com/stream.mp3"));
+        assert!(!is_url_input(Path::new("/tmp/song.mp3").to_str().unwrap_or_default()));
     }
 }
