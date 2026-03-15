@@ -22,7 +22,6 @@ pub struct TimelineSnapshot {
     pub track_index: usize,
     pub elapsed_in_track_secs: f64,
     pub generation: u64,
-    pub is_encoding_active: bool,
     pub current_metadata: TrackMetadata,
 }
 
@@ -43,7 +42,6 @@ impl PlaybackDirector {
             0,
             track_started_at,
             0,
-            listener_count.load(Ordering::SeqCst) > 0,
         );
         let (snapshot_tx, _) = watch::channel(initial_snapshot);
 
@@ -71,7 +69,6 @@ impl PlaybackDirector {
             self.current_index,
             self.track_started_at,
             self.generation,
-            self.has_listeners(),
         );
 
         if changed || *self.snapshot_tx.borrow() != next_snapshot {
@@ -94,13 +91,8 @@ impl PlaybackDirector {
             self.current_index,
             self.track_started_at,
             self.generation,
-            self.has_listeners(),
         );
         self.snapshot_tx.send_replace(next_snapshot);
-    }
-
-    pub fn has_listeners(&self) -> bool {
-        self.listener_count.load(Ordering::SeqCst) > 0
     }
 
     fn advance_finished_tracks(&mut self, now: Instant) -> bool {
@@ -164,7 +156,6 @@ impl PlaybackDirector {
         current_index: usize,
         track_started_at: Instant,
         generation: u64,
-        is_encoding_active: bool,
     ) -> TimelineSnapshot {
         if playlist.is_empty() {
             return TimelineSnapshot {
@@ -172,7 +163,6 @@ impl PlaybackDirector {
                 track_index: 0,
                 elapsed_in_track_secs: 0.0,
                 generation,
-                is_encoding_active,
                 current_metadata: TrackMetadata::default(),
             };
         }
@@ -203,7 +193,6 @@ impl PlaybackDirector {
                 .duration_since(track_started_at)
                 .as_secs_f64(),
             generation,
-            is_encoding_active,
             current_metadata,
         }
     }
@@ -321,10 +310,8 @@ mod tests {
             .expect("expected tick to publish snapshot")
             .expect("expected watch receiver to stay open");
         let snapshot = snapshot_rx.borrow().clone();
-        assert!(
-            snapshot.is_encoding_active,
-            "encoding should stay active even with zero listeners"
-        );
+        assert_eq!(snapshot.track_path, PathBuf::from("a.mp3"));
+        assert_eq!(snapshot.track_index, 0);
     }
 
     #[tokio::test]
@@ -333,19 +320,14 @@ mod tests {
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners.clone());
 
         director.tick();
-        assert!(
-            director.current_snapshot().is_encoding_active,
-            "encoding should be active with connected listeners"
-        );
+        assert_eq!(director.current_snapshot().track_path, PathBuf::from("a.mp3"));
 
         listeners.store(0, Ordering::SeqCst);
         director.tick();
 
         let snapshot = director.current_snapshot();
-        assert!(
-            snapshot.is_encoding_active,
-            "encoding should remain active after listeners disconnect"
-        );
+        assert_eq!(snapshot.track_path, PathBuf::from("a.mp3"));
+        assert_eq!(snapshot.track_index, 0);
     }
 
     #[tokio::test]
@@ -366,9 +348,5 @@ mod tests {
 
         assert_eq!(snapshot.track_path, PathBuf::from("b.mp3"));
         assert_eq!(snapshot.track_index, 1);
-        assert!(
-            snapshot.is_encoding_active,
-            "encoding should remain active while publishing snapshots with zero listeners"
-        );
     }
 }
