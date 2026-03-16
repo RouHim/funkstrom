@@ -4,7 +4,7 @@ use log::{debug, error, info, warn};
 use std::io::ErrorKind;
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -207,9 +207,11 @@ impl FFmpegProcessor {
         let mut args = Vec::new();
 
         if !is_url_input(input) {
-            if let Some(offset) = seek_offset_secs.filter(|offset| *offset > 0.0) {
-                args.push("-ss".to_string());
-                args.push(offset.to_string());
+            if let Some(offset) = seek_offset_secs {
+                if offset > 0.0 {
+                    args.push("-ss".to_string());
+                    args.push(offset.to_string());
+                }
             }
         }
 
@@ -432,7 +434,8 @@ impl FFmpegProcessor {
             loop {
                 {
                     let next_snapshot = timeline_rx.borrow_and_update().clone();
-                    let generation_changed = next_snapshot.generation != current_snapshot.generation;
+                    let generation_changed =
+                        next_snapshot.generation != current_snapshot.generation;
                     let track_changed = next_snapshot.track_path != current_snapshot.track_path;
                     if generation_changed || track_changed {
                         apply_snapshot_update(
@@ -570,13 +573,13 @@ impl FFmpegProcessor {
 
 pub struct AudioProcess {
     child: Child,
-    reader: Option<BufReader<std::process::ChildStdout>>,
-    stderr: Option<BufReader<std::process::ChildStderr>>,
+    reader: Option<ChildStdout>,
+    stderr: Option<BufReader<ChildStderr>>,
 }
 
 impl AudioProcess {
     fn new(mut child: Child) -> Self {
-        let reader = child.stdout.take().map(BufReader::new);
+        let reader = child.stdout.take();
         let stderr = child.stderr.take().map(BufReader::new);
         Self {
             child,
@@ -665,7 +668,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tempfile::tempdir;
     use tokio::sync::watch;
 
@@ -970,6 +973,38 @@ exit 1
             recv_result.is_ok(),
             "expected generation change to reset failure backoff so next track starts quickly"
         );
+    }
+
+    #[test]
+    fn given_ffmpeg_stdout_arrives_in_small_bursts_when_reading_chunk_then_returns_without_waiting_for_buffer_fill(
+    ) {
+        let fake_ffmpeg_path = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+printf 'abc'
+sleep 2
+printf 'def'
+exit 0
+"#,
+        );
+
+        let processor =
+            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let mut process = processor
+            .start_conversion_from_url("https://example.com/slow-stream")
+            .expect("fake ffmpeg process should start successfully");
+        let started_at = Instant::now();
+
+        let first_chunk = process
+            .read_chunk()
+            .expect("first read should succeed")
+            .expect("first read should return a chunk");
+        process.terminate();
+
+        assert!(
+            started_at.elapsed() < Duration::from_millis(500),
+            "expected first chunk to return promptly instead of waiting for an 8KB buffer fill"
+        );
+        assert_eq!(first_chunk, Bytes::from_static(b"abc"));
     }
 
     #[tokio::test(flavor = "current_thread")]
