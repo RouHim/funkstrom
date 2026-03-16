@@ -430,21 +430,17 @@ impl FFmpegProcessor {
                 };
 
             loop {
-                if timeline_rx.has_changed().unwrap_or(false) {
-                    match timeline_rx.changed().await {
-                        Ok(()) => {
-                            let next_snapshot = timeline_rx.borrow_and_update().clone();
-                            apply_snapshot_update(
-                                next_snapshot,
-                                &mut current_snapshot,
-                                &mut current_process,
-                                &mut consecutive_failures,
-                            );
-                        }
-                        Err(_) => {
-                            debug!("Timeline sender dropped, stopping timeline streaming service");
-                            break;
-                        }
+                {
+                    let next_snapshot = timeline_rx.borrow_and_update().clone();
+                    let generation_changed = next_snapshot.generation != current_snapshot.generation;
+                    let track_changed = next_snapshot.track_path != current_snapshot.track_path;
+                    if generation_changed || track_changed {
+                        apply_snapshot_update(
+                            next_snapshot,
+                            &mut current_snapshot,
+                            &mut current_process,
+                            &mut consecutive_failures,
+                        );
                     }
                 }
 
@@ -487,9 +483,16 @@ impl FFmpegProcessor {
                     }
                 }
 
-                if let Some(ref mut process) = current_process {
-                    match process.read_chunk() {
-                        Ok(Some(chunk)) => {
+                if let Some(process) = current_process.take() {
+                    match tokio::task::spawn_blocking(move || {
+                        let mut process = process;
+                        let result = process.read_chunk();
+                        (process, result)
+                    })
+                    .await
+                    {
+                        Ok((process, Ok(Some(chunk)))) => {
+                            current_process = Some(process);
                             let audio_chunk = AudioChunk { data: chunk };
 
                             if chunk_tx.send(audio_chunk).is_err() {
@@ -498,15 +501,14 @@ impl FFmpegProcessor {
                             }
                             consecutive_failures = 0;
                         }
-                        Ok(None) => {
+                        Ok((_process, Ok(None))) => {
                             info!(
                                 "Timeline track completed: {:?}, generation: {}",
                                 current_snapshot.track_path, current_snapshot.generation
                             );
-                            current_process = None;
                             consecutive_failures = 0;
                         }
-                        Err(e) => {
+                        Ok((_process, Err(e))) => {
                             let error_message = e.to_string();
                             if error_message.contains("non-zero status") {
                                 error!(
@@ -516,6 +518,10 @@ impl FFmpegProcessor {
                             } else {
                                 error!("Error reading from FFmpeg process: {}", error_message);
                             }
+                            consecutive_failures += 1;
+                        }
+                        Err(e) => {
+                            error!("spawn_blocking panicked reading audio chunk: {}", e);
                             current_process = None;
                             consecutive_failures += 1;
                         }
