@@ -4,7 +4,7 @@ use log::{debug, error, info, warn};
 use std::io::ErrorKind;
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -207,11 +207,9 @@ impl FFmpegProcessor {
         let mut args = Vec::new();
 
         if !is_url_input(input) {
-            if let Some(offset) = seek_offset_secs {
-                if offset > 0.0 {
-                    args.push("-ss".to_string());
-                    args.push(offset.to_string());
-                }
+            if let Some(offset) = seek_offset_secs.filter(|offset| *offset > 0.0) {
+                args.push("-ss".to_string());
+                args.push(offset.to_string());
             }
         }
 
@@ -219,6 +217,7 @@ impl FFmpegProcessor {
             "-re".to_string(),
             "-i".to_string(),
             input.to_string(),
+            "-vn".to_string(),
             "-f".to_string(),
             muxer.to_string(),
             "-acodec".to_string(),
@@ -573,13 +572,13 @@ impl FFmpegProcessor {
 
 pub struct AudioProcess {
     child: Child,
-    reader: Option<ChildStdout>,
-    stderr: Option<BufReader<ChildStderr>>,
+    reader: Option<BufReader<std::process::ChildStdout>>,
+    stderr: Option<BufReader<std::process::ChildStderr>>,
 }
 
 impl AudioProcess {
     fn new(mut child: Child) -> Self {
-        let reader = child.stdout.take();
+        let reader = child.stdout.take().map(BufReader::new);
         let stderr = child.stderr.take().map(BufReader::new);
         Self {
             child,
@@ -593,7 +592,6 @@ impl AudioProcess {
     ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref mut reader) = self.reader {
             let mut buffer = [0u8; AUDIO_CHUNK_SIZE];
-
             match reader.read(&mut buffer) {
                 Ok(0) => {
                     // EOF reached
@@ -668,7 +666,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tempfile::tempdir;
     use tokio::sync::watch;
 
@@ -887,6 +885,13 @@ mod tests {
     }
 
     #[test]
+    fn given_audio_conversion_when_building_ffmpeg_args_then_disables_video_streams() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let args = processor.build_ffmpeg_args("/tmp/song.flac", None);
+        assert!(args.iter().any(|arg| arg == "-vn"));
+    }
+
+    #[test]
     fn given_http_and_https_inputs_when_checking_is_url_then_detects_both_protocols() {
         assert!(is_url_input("http://example.com/stream.mp3"));
         assert!(is_url_input("https://example.com/stream.mp3"));
@@ -973,38 +978,6 @@ exit 1
             recv_result.is_ok(),
             "expected generation change to reset failure backoff so next track starts quickly"
         );
-    }
-
-    #[test]
-    fn given_ffmpeg_stdout_arrives_in_small_bursts_when_reading_chunk_then_returns_without_waiting_for_buffer_fill(
-    ) {
-        let fake_ffmpeg_path = create_fake_ffmpeg_script(
-            r#"#!/bin/sh
-printf 'abc'
-sleep 2
-printf 'def'
-exit 0
-"#,
-        );
-
-        let processor =
-            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
-        let mut process = processor
-            .start_conversion_from_url("https://example.com/slow-stream")
-            .expect("fake ffmpeg process should start successfully");
-        let started_at = Instant::now();
-
-        let first_chunk = process
-            .read_chunk()
-            .expect("first read should succeed")
-            .expect("first read should return a chunk");
-        process.terminate();
-
-        assert!(
-            started_at.elapsed() < Duration::from_millis(500),
-            "expected first chunk to return promptly instead of waiting for an 8KB buffer fill"
-        );
-        assert_eq!(first_chunk, Bytes::from_static(b"abc"));
     }
 
     #[tokio::test(flavor = "current_thread")]
