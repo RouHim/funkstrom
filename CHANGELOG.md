@@ -1,3 +1,11 @@
+## [1.1.2](https://github.com/RouHim/funkstrom/compare/1.1.1...1.1.2) (2026-06-04)
+
+
+### Bug Fixes
+
+* add targeted allow(dead_code) for test-only and unused items ([071107a](https://github.com/RouHim/funkstrom/commit/071107a00fbd58ff775aef97301c6d9c457c84e0))
+* P1-P3 code review findings ([5fd74b0](https://github.com/RouHim/funkstrom/commit/5fd74b04ee72dd697aa546fd23ecf1c22ab9c93a))
+
 ## [1.1.1](https://github.com/RouHim/funkstrom/compare/1.1.0...1.1.1) (2026-06-04)
 
 
