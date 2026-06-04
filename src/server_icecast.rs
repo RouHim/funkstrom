@@ -139,6 +139,44 @@ fn build_icy_metadata_block(artist_title: &str) -> Vec<u8> {
     block
 }
 
+/// Process a chunk of audio data, splitting at `metaint` boundaries and inserting
+/// ICY metadata blocks. Returns output blocks that are sent to the client in order.
+///
+/// Maintains `bytes_since_meta` and `last_meta_str` across calls so metadata
+/// boundaries stay aligned and change detection works across chunks.
+fn process_audio_with_icy(
+    chunk: Bytes,
+    metaint: usize,
+    bytes_since_meta: &mut usize,
+    last_meta_str: &mut String,
+    current_meta_str: &str,
+) -> Vec<Bytes> {
+    let mut output = Vec::new();
+    let mut offset = 0;
+    while offset < chunk.len() {
+        let remaining_in_interval = metaint - *bytes_since_meta;
+        let consume = remaining_in_interval.min(chunk.len() - offset);
+
+        if consume > 0 {
+            output.push(chunk.slice(offset..offset + consume));
+            offset += consume;
+            *bytes_since_meta += consume;
+        }
+
+        if *bytes_since_meta >= metaint {
+            let block: Vec<u8> = if *current_meta_str != *last_meta_str {
+                *last_meta_str = current_meta_str.to_string();
+                build_icy_metadata_block(last_meta_str)
+            } else {
+                vec![0x00]
+            };
+            output.push(Bytes::from(block));
+            *bytes_since_meta = 0;
+        }
+    }
+    output
+}
+
 impl IcecastServer {
     pub fn new(
         stream_buffers: Vec<StreamBufferEntry>,
@@ -324,19 +362,11 @@ impl IcecastServer {
             let timeout_duration = Duration::from_secs(30);
 
             const METADATA_INTERVAL: usize = 16000;
+            // byte counters start at 0 from first audio byte; no initial metadata block
+            // (VLC, GStreamer icydemux count from HTTP body start — a leading block
+            //  would be treated as audio, permanently misaligning all metadata boundaries)
             let mut bytes_since_meta: usize = 0;
             let mut last_meta_str = String::new();
-
-            // Send initial metadata block before any audio data
-            if do_icy_metadata_clone {
-                let initial_snapshot = timeline_rx.borrow();
-                let initial_meta = initial_snapshot.current_metadata.to_icy_metadata();
-                last_meta_str = initial_meta.clone();
-                let initial_block = build_icy_metadata_block(&initial_meta);
-                if tx.send(Ok(Bytes::from(initial_block))).is_err() {
-                    return;
-                }
-            }
 
             loop {
                 let chunk = match buffer.read() {
@@ -349,36 +379,17 @@ impl IcecastServer {
 
                 if let Some(chunk) = chunk {
                     if do_icy_metadata_clone {
-                        let mut offset = 0;
-                        while offset < chunk.len() {
-                            let remaining_in_interval = METADATA_INTERVAL - bytes_since_meta;
-                            let consume = remaining_in_interval.min(chunk.len() - offset);
-
-                            if consume > 0 {
-                                let audio_slice = chunk.slice(offset..offset + consume);
-                                if tx.send(Ok(audio_slice)).is_err() {
-                                    log::info!("Client disconnected");
-                                    return;
-                                }
-                                offset += consume;
-                                bytes_since_meta += consume;
-                            }
-
-                            if bytes_since_meta >= METADATA_INTERVAL {
-                                // Inject metadata block
-                                let snapshot = timeline_rx.borrow();
-                                let current_meta = snapshot.current_metadata.to_icy_metadata();
-                                let block = if current_meta != last_meta_str {
-                                    last_meta_str = current_meta;
-                                    build_icy_metadata_block(&last_meta_str)
-                                } else {
-                                    vec![0x00]
-                                };
-                                if tx.send(Ok(Bytes::from(block))).is_err() {
-                                    log::info!("Client disconnected");
-                                    return;
-                                }
-                                bytes_since_meta = 0;
+                        let current_meta = timeline_rx.borrow().current_metadata.to_icy_metadata();
+                        for block in process_audio_with_icy(
+                            chunk,
+                            METADATA_INTERVAL,
+                            &mut bytes_since_meta,
+                            &mut last_meta_str,
+                            &current_meta,
+                        ) {
+                            if tx.send(Ok(block)).is_err() {
+                                log::info!("Client disconnected");
+                                return;
                             }
                         }
                     } else {
@@ -684,4 +695,184 @@ mod tests {
         assert!(content.contains("Motörhead"));
         assert!(content.contains("Åce of Spädes"));
     }
+}
+
+// --- process_audio_with_icy tests ---
+
+#[test]
+fn given_bytes_since_meta_zero_when_short_chunk_then_all_output_is_audio() {
+    // Regression: no metadata block must appear at byte 0 of the stream.
+    let chunk = Bytes::from(vec![0xAA; 100]);
+    let mut bytes_since_meta = 0;
+    let mut last_meta_str = String::new();
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Some Artist - Some Track",
+    );
+
+    // All blocks are audio — no metadata injected
+    assert!(!blocks.is_empty());
+    for block in &blocks {
+        assert!(
+            block.len() > 1 || !block.is_empty(),
+            "all blocks under metaint should be audio chunks"
+        );
+    }
+    // Only one audio chunk (no splitting needed)
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].len(), 100);
+    assert_eq!(bytes_since_meta, 100);
+    assert_eq!(last_meta_str, ""); // unchanged — no boundary hit
+}
+
+#[test]
+fn given_bytes_near_metaint_when_chunk_crosses_boundary_then_metadata_injected() {
+    // bytes_since_meta at 15900, chunk of 200 bytes.
+    // Should produce: 100 bytes audio, metadata block, 100 bytes audio.
+    let chunk = Bytes::from(vec![0xBB; 200]);
+    let mut bytes_since_meta = 15900;
+    let mut last_meta_str = String::new();
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Artist - Title",
+    );
+
+    assert_eq!(blocks.len(), 3, "audio, metadata, audio");
+    // First block: audio, 100 bytes (fills remaining interval)
+    assert_eq!(blocks[0].len(), 100);
+    // Second block: metadata block
+    assert!(
+        blocks[1].len() > 1,
+        "metadata block must be more than empty \\x00"
+    );
+    // Third block: remaining 100 bytes of audio
+    assert_eq!(blocks[2].len(), 100);
+    // Counter must reset after metadata boundary
+    assert_eq!(bytes_since_meta, 100);
+    // last_meta_str must be updated
+    assert_eq!(last_meta_str, "Artist - Title");
+}
+
+#[test]
+fn given_metadata_unchanged_when_boundary_hit_then_empty_block() {
+    let chunk = Bytes::from(vec![0xCC; 16000]);
+    let mut bytes_since_meta = 15900;
+    let mut last_meta_str = String::from("Artist - Title");
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Artist - Title", // same as last_meta_str
+    );
+
+    assert_eq!(blocks.len(), 3);
+    // Metadata block should be single zero byte
+    assert_eq!(blocks[1].len(), 1);
+    assert_eq!(blocks[1][0], 0x00);
+    // last_meta_str unchanged
+    assert_eq!(last_meta_str, "Artist - Title");
+}
+
+#[test]
+fn given_metadata_changed_when_boundary_hit_then_full_block_and_counter_update() {
+    let chunk = Bytes::from(vec![0xDD; 16000]);
+    let mut bytes_since_meta = 15900;
+    let mut last_meta_str = String::from("Old Artist - Old Title");
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "New Artist - New Title",
+    );
+
+    assert_eq!(blocks.len(), 3);
+    // Metadata block must be > 1 byte (not empty)
+    assert!(blocks[1].len() > 1);
+    // last_meta_str updates to new value
+    assert_eq!(last_meta_str, "New Artist - New Title");
+}
+
+#[test]
+fn given_chunk_spanning_multiple_boundaries_then_metadata_at_each() {
+    // 50000 bytes, metaint=16000 → boundaries at 16000, 32000, 48000
+    // Metadata unchanged → all empty blocks
+    let chunk = Bytes::from(vec![0xEE; 50000]);
+    let mut bytes_since_meta = 0;
+    let mut last_meta_str = String::from("Track A - Song A");
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Track A - Song A", // unchanged
+    );
+
+    // Layout: A=[16000] M=[empty] A=[16000] M=[empty] A=[16000] M=[empty] A=[2000]
+    assert_eq!(blocks.len(), 7);
+    assert_eq!(blocks[0].len(), 16000);
+    assert_eq!(blocks[1].len(), 1);
+    assert_eq!(blocks[1][0], 0x00);
+    assert_eq!(blocks[2].len(), 16000);
+    assert_eq!(blocks[3].len(), 1);
+    assert_eq!(blocks[3][0], 0x00);
+    assert_eq!(blocks[4].len(), 16000);
+    assert_eq!(blocks[5].len(), 1);
+    assert_eq!(blocks[5][0], 0x00);
+    assert_eq!(blocks[6].len(), 2000);
+    assert_eq!(bytes_since_meta, 2000);
+    assert_eq!(last_meta_str, "Track A - Song A");
+}
+
+#[test]
+fn given_chunk_exactly_at_metaint_boundary_then_only_metadata_emitted() {
+    // bytes_since_meta already at metaint, so chunk should trigger metadata right away
+    let chunk = Bytes::from(vec![0xFF; 100]);
+    let mut bytes_since_meta = 16000;
+    let mut last_meta_str = String::new();
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Artist - Track",
+    );
+
+    // First: metadata (boundary already reached), then 100 bytes audio
+    assert_eq!(blocks.len(), 2);
+    assert!(blocks[0].len() > 1, "first block is metadata");
+    assert_eq!(blocks[1].len(), 100, "second block is audio");
+    assert_eq!(bytes_since_meta, 100);
+}
+
+#[test]
+fn given_empty_chunk_when_processing_then_no_output() {
+    let chunk = Bytes::new();
+    let mut bytes_since_meta = 0;
+    let mut last_meta_str = String::new();
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Artist - Track",
+    );
+
+    assert!(blocks.is_empty());
+    assert_eq!(bytes_since_meta, 0);
+    assert_eq!(last_meta_str, "");
 }
