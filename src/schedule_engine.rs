@@ -89,12 +89,12 @@ impl ScheduleEngine {
 
         let playlist_path = match program_type {
             ProgramType::Playlist => {
-                let path = PathBuf::from(
-                    program
-                        .playlist
-                        .as_ref()
-                        .ok_or_else(|| format!("Playlist path should exist after validation for program '{}'", program.name))?,
-                );
+                let path = PathBuf::from(program.playlist.as_ref().ok_or_else(|| {
+                    format!(
+                        "Playlist path should exist after validation for program '{}'",
+                        program.name
+                    )
+                })?);
                 M3uParser::validate_playlist(&path)?;
                 Some(path)
             }
@@ -102,12 +102,12 @@ impl ScheduleEngine {
         };
 
         let genres = match program_type {
-            ProgramType::Liveset => Some(
-                program
-                    .genres
-                    .clone()
-                    .ok_or_else(|| format!("Genres should exist after validation for program '{}'", program.name))?,
-            ),
+            ProgramType::Liveset => Some(program.genres.clone().ok_or_else(|| {
+                format!(
+                    "Genres should exist after validation for program '{}'",
+                    program.name
+                )
+            })?),
             ProgramType::Playlist => None,
         };
 
@@ -244,7 +244,10 @@ impl ScheduleEngine {
                 let playlist_path = match program.playlist_path.as_ref() {
                     Some(p) => p,
                     None => {
-                        error!("Playlist path missing for playlist program '{}'", program.name);
+                        error!(
+                            "Playlist path missing for playlist program '{}'",
+                            program.name
+                        );
                         return;
                     }
                 };

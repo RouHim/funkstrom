@@ -371,8 +371,7 @@ mod tests {
             .collect();
         let playlist_set: std::collections::HashSet<&str> =
             playlist_paths.iter().map(|s| s.as_str()).collect();
-        let db_set: std::collections::HashSet<&str> =
-            db_paths.iter().map(|s| s.as_str()).collect();
+        let db_set: std::collections::HashSet<&str> = db_paths.iter().map(|s| s.as_str()).collect();
         assert_eq!(playlist_set, db_set, "shuffle must preserve all tracks");
     }
 
