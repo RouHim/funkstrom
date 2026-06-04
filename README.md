@@ -3,7 +3,7 @@
 [![CI](https://github.com/RouHim/funkstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/RouHim/funkstrom/actions/workflows/ci.yml)
 [![Donate me](https://img.shields.io/badge/-buy_me_a%C2%A0coffee-gray?logo=buy-me-a-coffee)](https://buymeacoffee.com/rouhim)
 
-*A fast, lightweight Icecast-compatible internet radio server written in Rust.*
+_A fast, lightweight Icecast-compatible internet radio server written in Rust._
 
 ## Motivation
 
@@ -42,45 +42,11 @@ docker run -p 8284:8284 \
 > [!TIP]
 > Mounting the `/app/data` directory is optional but highly recommended. It stores the SQLite database that indexes your music library. Without it, the server will perform a full library scan every time the container restarts, which can take several minutes for large libraries.
 
-#### The `/app/data` directory
-
 The container stores persistent data in `/app/data/`:
 
-| File | Purpose |
-|------|---------|
+| File          | Purpose                                                                             |
+| ------------- | ----------------------------------------------------------------------------------- |
 | `database.db` | SQLite database with track metadata, file paths, shuffle state, and scan timestamps |
-
-**Backup the database:**
-
-```bash
-# Bind mount
-cp /path/to/data/database.db /path/to/backup/database.db
-
-# Named volume
-docker cp funkstrom:/app/data/database.db ./backup/database.db
-```
-
-**Force a full library rescan:**
-
-```bash
-# Bind mount
-rm /path/to/data/database.db
-docker restart funkstrom
-
-# Named volume
-docker exec funkstrom rm /app/data/database.db
-docker restart funkstrom
-```
-
-**Inspect data directory contents:**
-
-```bash
-# Bind mount
-ls -la /path/to/data/
-
-# Named volume
-docker exec funkstrom ls -la /app/data/
-```
 
 Docker Compose example using bind mounts:
 
@@ -99,24 +65,16 @@ services:
     restart: unless-stopped
 ```
 
-Docker Compose example using named volumes:
+**Force a full library rescan:**
 
-```yaml
-services:
-  funkstrom:
-    image: ghcr.io/rouhim/funkstrom
-    volumes:
-      - /path/to/music:/music:ro
-      - /path/to/config.toml:/config.toml:ro
-      - funkstrom-data:/app/data
-    ports:
-      - "8284:8284"
-    environment:
-      - RUST_LOG=info
-    restart: unless-stopped
+```bash
+# Bind mount
+rm /path/to/data/database.db
+docker restart funkstrom
 
-volumes:
-  funkstrom-data:
+# Named volume
+docker exec funkstrom rm /app/data/database.db
+docker restart funkstrom
 ```
 
 ### Native execution
@@ -144,7 +102,17 @@ Or build from source:
 cargo build --release
 ```
 
-#### Running
+Start the server:
+
+```bash
+./funkstrom --config config.toml
+```
+
+Then open your browser at `http://127.0.0.1:8284/` or stream audio at `http://127.0.0.1:8284/stream`
+
+### Configuration
+
+> The detail configuration documentation could be found [here](docs/configuration.md)
 
 Create a configuration file `config.toml`:
 
@@ -171,66 +139,17 @@ description = "Great music 24/7"
 genre = "Various"
 ```
 
-Start the server:
-
-```bash
-./funkstrom --config config.toml
-```
-
-Then open your browser at `http://127.0.0.1:8284/` or stream audio at `http://127.0.0.1:8284/stream`
-
-## Configuration
-
-All configuration is done via the `config.toml` file:
-
-| Section | Key | Description | Default | Required |
-|---------|-----|-------------|---------|----------|
-| `[server]` | `port` | Port on which the server should listen | `8284` | No |
-| `[server]` | `bind_address` | IP address to bind to | `127.0.0.1` | No |
-| `[library]` | `music_directory` | Path to music directory | - | Yes |
-| `[library]` | `shuffle` | Shuffle playback order | `true` | No |
-| `[library]` | `repeat` | Repeat playlist when finished | `true` | No |
-| `[stream.NAME]` | `bitrate` | MP3 bitrate in kbps | `128` | No |
-| `[station]` | `name` | Station name (Icecast header) | `"My Radio Station"` | No |
-| `[station]` | `description` | Station description | `"Great music 24/7"` | No |
-| `[station]` | `genre` | Station genre | `"Various"` | No |
-
-You can also set `RUST_LOG` environment variable for logging (trace, debug, info, warn, error).
-
-
 ## End-to-End Tests
 
 ```bash
-# Start the server first (first run compiles, ~20s)
+# Start the server first
 nohup cargo run -- --config e2e/ci-config.toml &
 
 # Basic suite (16 tests)
 ./e2e/test.sh
 
-# Multi-listener sync suite (starts its own server, ~2min)
+# Multi-listener sync suite
 ./e2e/test_sync.sh
 ```
 
 Both use `e2e/ci-config.toml` (port 3002). Requires `curl`, `jq`, and a `test_music` directory.
-
-## API Endpoints
-
-- **`GET /`** - Web interface with station info and current track
-- **`GET /stream`** - Audio stream endpoint (Icecast compatible)
-- **`GET /status`** - JSON status including buffer info and station details
-- **`GET /current`** - JSON metadata for currently playing track
-- **`GET /api-docs`** - Interactive Swagger API documentation
-
-## Supported Formats
-
-Audio files are automatically transcoded to MP3 for streaming. Supported input formats:
-
-- **MP3, FLAC, WAV, OGG, AAC, M4A, OPUS, WMA** and more (anything FFmpeg supports)
-
-## Support
-
-If you find Funkstrom useful, consider [buying me a coffee](https://buymeacoffee.com/rouhim)
-
-## License
-
-MIT
