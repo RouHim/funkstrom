@@ -250,39 +250,36 @@ else
 fi
 rm -f "$HEADERS_FILE"
 
-# Test 19: Initial metadata block contains StreamTitle and StreamUrl
-echo "Test 19: Initial metadata block contains StreamTitle and StreamUrl"
+# Test 19: First metadata block at metaint=16000 contains StreamTitle and StreamUrl
+echo "Test 19: First metadata block at metaint=16000 contains StreamTitle and StreamUrl"
 DATA_FILE=$(mktemp)
+# Need at least 16000 + 1 + N*16 bytes (typically ~16050). 5 sec at 128kbps ≈ 80KB, plenty.
 timeout 5 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2>/dev/null || true
-FIRST_BYTE=$(od -An -tx1 -N1 "$DATA_FILE" | tr -d ' ')
-if [ "$FIRST_BYTE" != "00" ]; then
-    # Non-zero first byte means a metadata block (count N). Read it.
-    BLOCKS=$((16#$FIRST_BYTE))
+# Skip 16000 bytes of audio, read the metadata block count byte at position 16000
+BLOCK_COUNT_BYTE=$(od -An -tx1 -j 16000 -N1 "$DATA_FILE" | tr -d ' ')
+if [ -n "$BLOCK_COUNT_BYTE" ] && [ "$BLOCK_COUNT_BYTE" != "00" ]; then
+    BLOCKS=$((16#$BLOCK_COUNT_BYTE))
     META_SIZE=$((1 + BLOCKS * 16))
-    META_CONTENT=$(dd if="$DATA_FILE" bs=1 count="$META_SIZE" 2>/dev/null | strings)
+    META_CONTENT=$(dd if="$DATA_FILE" bs=1 skip=16000 count="$META_SIZE" 2>/dev/null | strings)
     if echo "$META_CONTENT" | grep -q "StreamTitle=" && echo "$META_CONTENT" | grep -q "StreamUrl="; then
         echo "  PASS: $META_CONTENT"
         PASS=$((PASS + 1))
     else
-        echo "  FAIL: metadata block missing StreamTitle/StreamUrl fields"
+        echo "  FAIL: metadata at 16000 missing StreamTitle/StreamUrl fields (got: $META_CONTENT)"
         FAIL=$((FAIL + 1))
     fi
 else
-    echo "  FAIL: initial byte is 0x00 (empty block, expected metadata)"
+    echo "  FAIL: no metadata block at position 16000 (expected non-zero block count, got 0x$BLOCK_COUNT_BYTE)"
     FAIL=$((FAIL + 1))
 fi
 rm -f "$DATA_FILE"
 
-# Test 20: Metadata block injected at metaint boundary
-echo "Test 20: Metadata block injected at metaint boundary"
+# Test 20: Metadata block injected at metaint boundary (no initial block offset)
+echo "Test 20: Metadata block injected at metaint boundary (16000)"
 DATA_FILE=$(mktemp)
 timeout 8 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2>/dev/null || true
-# Determine initial metadata block size
-FIRST_BYTE=$(od -An -tx1 -N1 "$DATA_FILE" | tr -d ' ')
-INIT_BLOCKS=$((16#$FIRST_BYTE))
-INIT_META_SIZE=$((1 + INIT_BLOCKS * 16))
-# First metadata boundary is at INIT_META_SIZE + 16000
-BOUNDARY_POS=$((INIT_META_SIZE + 16000))
+# With no initial block, first metadata boundary is at exactly 16000
+BOUNDARY_POS=16000
 META_BYTE=$(od -An -tx1 -j "$BOUNDARY_POS" -N1 "$DATA_FILE" | tr -d ' ')
 if [ -n "$META_BYTE" ]; then
     echo "  PASS: metadata byte 0x$META_BYTE at position $BOUNDARY_POS"
@@ -293,25 +290,32 @@ else
 fi
 rm -f "$DATA_FILE"
 
-# Test 21: ICY metadata matches /current endpoint track info
+# Test 21: ICY metadata at metaint=16000 matches /current endpoint track info
 echo "Test 21: ICY metadata matches /current endpoint track info"
 DATA_FILE=$(mktemp)
 timeout 5 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2>/dev/null || true
 CURRENT_JSON=$(curl -s "${BASE_URL}/current")
 CURRENT_ARTIST=$(echo "$CURRENT_JSON" | jq -r '.artist')
 CURRENT_TITLE=$(echo "$CURRENT_JSON" | jq -r '.title')
+# Build expected metadata string — compare against the raw metadata bytes (not strings output)
 EXPECTED_ICY="StreamTitle='${CURRENT_ARTIST} - ${CURRENT_TITLE}';StreamUrl='';"
-# Read initial metadata block
-FIRST_BYTE=$(od -An -tx1 -N1 "$DATA_FILE" | tr -d ' ')
-BLOCKS=$((16#$FIRST_BYTE))
-META_SIZE=$((1 + BLOCKS * 16))
-META_RAW=$(dd if="$DATA_FILE" bs=1 count="$META_SIZE" 2>/dev/null | strings | head -1)
-if [ "$META_RAW" = "$EXPECTED_ICY" ]; then
-    echo "  PASS: '$META_RAW'"
-    PASS=$((PASS + 1))
-else
-    echo "  FAIL: got '$META_RAW', expected '$EXPECTED_ICY'"
+# Read first metadata block at position 16000
+BLOCK_COUNT_BYTE=$(od -An -tx1 -j 16000 -N1 "$DATA_FILE" | tr -d ' ')
+if [ -z "$BLOCK_COUNT_BYTE" ] || [ "$BLOCK_COUNT_BYTE" = "00" ]; then
+    echo "  FAIL: no metadata block at position 16000"
     FAIL=$((FAIL + 1))
+else
+    BLOCKS=$((16#$BLOCK_COUNT_BYTE))
+    META_SIZE=$((1 + BLOCKS * 16))
+    # Extract metadata payload (skip the count byte), convert to string
+    META_RAW=$(dd if="$DATA_FILE" bs=1 skip=16001 count="$((BLOCKS * 16))" 2>/dev/null | strings | head -1)
+    if [ "$META_RAW" = "$EXPECTED_ICY" ]; then
+        echo "  PASS: '$META_RAW'"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: got '$META_RAW', expected '$EXPECTED_ICY'"
+        FAIL=$((FAIL + 1))
+    fi
 fi
 rm -f "$DATA_FILE"
 echo
