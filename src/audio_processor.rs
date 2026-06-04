@@ -680,25 +680,20 @@ mod tests {
         }
     }
 
-    fn create_fake_ffmpeg_script(script_body: &str) -> String {
+    fn create_fake_ffmpeg_script(script_body: &str) -> (tempfile::TempDir, String) {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
-
         let dir = tempdir().expect("temporary directory should be created");
         let path = dir.path().join("fake-ffmpeg.sh");
-
         fs::write(&path, script_body).expect("fake ffmpeg script should be written");
-
         let mut permissions = fs::metadata(&path)
             .expect("fake ffmpeg script metadata should be readable")
             .permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&path, permissions)
             .expect("fake ffmpeg script should be marked executable");
-
         let script_path = path.to_string_lossy().to_string();
-        std::mem::forget(dir);
-        script_path
+        (dir, script_path)
     }
 
     #[test]
@@ -903,7 +898,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn given_snapshot_without_encoding_active_flag_when_processing_then_ffmpeg_decision_not_gated(
     ) {
-        let fake_ffmpeg_path = create_fake_ffmpeg_script(
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
             r#"#!/bin/sh
 printf 'audio'
 exit 0
@@ -933,7 +928,7 @@ exit 0
 
     #[tokio::test(flavor = "current_thread")]
     async fn given_ffmpeg_fails_when_generation_changes_then_consecutive_failures_resets() {
-        let fake_ffmpeg_path = create_fake_ffmpeg_script(
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
             r#"#!/bin/sh
 for arg in "$@"; do
   case "$arg" in

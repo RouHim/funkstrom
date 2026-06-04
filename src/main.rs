@@ -1,10 +1,8 @@
-#[allow(dead_code)]
 mod audio_metadata;
 mod audio_processor;
 mod audio_reader;
 mod cli;
 mod config;
-#[allow(dead_code)]
 mod fanout_buffer;
 mod hearthis_client;
 mod library_db;

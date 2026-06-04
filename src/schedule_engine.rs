@@ -93,7 +93,7 @@ impl ScheduleEngine {
                     program
                         .playlist
                         .as_ref()
-                        .expect("Playlist path should exist after validation"),
+                        .ok_or_else(|| format!("Playlist path should exist after validation for program '{}'", program.name))?,
                 );
                 M3uParser::validate_playlist(&path)?;
                 Some(path)
@@ -106,7 +106,7 @@ impl ScheduleEngine {
                 program
                     .genres
                     .clone()
-                    .expect("Genres should exist after validation"),
+                    .ok_or_else(|| format!("Genres should exist after validation for program '{}'", program.name))?,
             ),
             ProgramType::Playlist => None,
         };
@@ -241,10 +241,13 @@ impl ScheduleEngine {
 
         match program.program_type {
             ProgramType::Playlist => {
-                let playlist_path = program
-                    .playlist_path
-                    .as_ref()
-                    .expect("Playlist path should exist for playlist programs");
+                let playlist_path = match program.playlist_path.as_ref() {
+                    Some(p) => p,
+                    None => {
+                        error!("Playlist path missing for playlist program '{}'", program.name);
+                        return;
+                    }
+                };
 
                 match M3uParser::parse(playlist_path) {
                     Ok(tracks) => {
@@ -278,10 +281,13 @@ impl ScheduleEngine {
                 }
             }
             ProgramType::Liveset => {
-                let genres = program
-                    .genres
-                    .as_ref()
-                    .expect("Genres should exist for liveset programs");
+                let genres = match program.genres.as_ref() {
+                    Some(g) => g,
+                    None => {
+                        error!("Genres missing for liveset program '{}'", program.name);
+                        return;
+                    }
+                };
 
                 info!(
                     "Starting liveset program '{}' (genres: {:?}, duration: {})",

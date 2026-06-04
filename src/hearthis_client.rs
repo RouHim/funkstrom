@@ -39,8 +39,6 @@
 
 use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 const HEARTHIS_API_BASE: &str = "https://api-v2.hearthis.at";
 
@@ -195,14 +193,9 @@ impl HearthisClient {
 
         Ok(Self::select_random_track(&tracks))
     }
-
     fn select_random_track(tracks: &[HearthisTrack]) -> HearthisTrack {
-        // Use a simple deterministic random selection based on current time
-        let mut hasher = DefaultHasher::new();
-        std::time::SystemTime::now().hash(&mut hasher);
-        let seed = hasher.finish() as usize;
-
-        let index = seed % tracks.len();
+        use rand::Rng;
+        let index = rand::thread_rng().gen_range(0..tracks.len());
         tracks[index].clone()
     }
 }

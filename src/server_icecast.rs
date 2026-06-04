@@ -86,8 +86,6 @@ struct StreamContext {
     station_genre: String,
     listeners: Arc<AtomicUsize>,
     notify: Arc<tokio::sync::Notify>,
-    #[allow(dead_code)]
-    is_paused: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -197,7 +195,6 @@ impl IcecastServer {
                                 station_genre: station_genre.clone(),
                                 listeners: stream.listeners.clone(),
                                 notify: stream.notify.clone(),
-                                is_paused: stream.is_paused.clone(),
                             };
                             return Self::handle_stream_request(headers, context).await;
                         }

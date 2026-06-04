@@ -363,15 +363,17 @@ mod tests {
 
         let reader = AudioReader::new(PathBuf::from("/music"), true, true, db.clone()).unwrap();
         let playlist = reader.build_playlist();
-
         let db_tracks = db.get_all_tracks().unwrap();
         let db_paths: Vec<String> = db_tracks.iter().map(|t| t.file_path.clone()).collect();
         let playlist_paths: Vec<String> = playlist
             .iter()
             .map(|t| t.path.to_str().unwrap().to_string())
             .collect();
-
-        assert_ne!(db_paths, playlist_paths);
+        let playlist_set: std::collections::HashSet<&str> =
+            playlist_paths.iter().map(|s| s.as_str()).collect();
+        let db_set: std::collections::HashSet<&str> =
+            db_paths.iter().map(|s| s.as_str()).collect();
+        assert_eq!(playlist_set, db_set, "shuffle must preserve all tracks");
     }
 
     #[test]
