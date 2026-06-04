@@ -1,97 +1,149 @@
-# AGENTS.md - Funkstrom Coding Guidelines
+# Repository Guidelines
 
-## Color Schema - Deep Sea Radio
+## Project Overview
 
-Official color palette for all visual assets:
+Funkstrom is an Icecast-compatible internet radio server written in Rust. It scans a local music library, builds playlists, transcodes audio via FFmpeg, and streams to unlimited concurrent HTTP listeners with Icecast/Shoutcast protocol headers. Supports scheduled programming (cron-based playlist and liveset switching) and integration with the Hearthis.at API.
 
-- **Primary Gradient**: `#0891b2` (Cyan) → `#1e40af` (Deep Blue)
-- **Background**: `#0c1821` (Deep ocean)
-- **Accent**: `#14b8a6` (Teal)
-- **Secondary**: `#67e8f9` (Light cyan)
-- **Text**: `#cffafe` (Ice cyan)
+## Architecture & Data Flow
 
-Vibe: Oceanic, calm, professional with mysterious depth
+```
+CLI (clap) → Config (TOML) → Library Scanner → SQLite DB (rusqlite + r2d2)
+                                    ↓
+                            AudioReader (DB → playlist)
+                                    ↓
+                     Schedule Engine (cron) → PlaylistCommand (crossbeam)
+                                    ↓
+                          PlaybackDirector (timeline, watch::channel)
+                                    ↓
+                          FFmpegProcessor (transcoding subprocess)
+                                    ↓
+                           FanoutBuffer (ring buffer, Arc<RwLock<>>)
+                                    ↓
+                    Icecast Server (warp) → HTTP listeners (chunked transfer)
+```
 
-## Build/Test/Lint Commands
+**Key data flow**: Tracks are indexed from disk into SQLite. `AudioReader` builds optionally-shuffled playlists and feeds them to `PlaybackDirector`, which advances through tracks by wall-clock time, broadcasting `TimelineSnapshot` via `tokio::watch`. `FFmpegProcessor` spawns an FFmpeg subprocess to transcode the current track to the configured output format; audio chunks (8KB) are pushed into a shared `FanoutBuffer`. HTTP listeners each hold an independent cursor into the ring buffer, receiving chunks via an `mpsc` unbounded channel.
 
-- `cargo build` - Build the project
-- `cargo run -- --config config.toml` - Run with config file
-- `cargo test` - Run all Rust unit tests
-- `cargo test <test_name>` - Run specific test
-- `cargo clippy` - Lint code
-- `cargo fmt` - Format code
-- `./e2e/test.sh` - Run E2E tests (requires running server)
+**Schedule engine** runs as a `tokio::spawn`'d async loop, evaluating cron expressions and sending `PlaylistCommand` variants (`SwitchToPlaylist`, `SwitchToLiveset`, `ReturnToLibrary`) through a `crossbeam-channel` to `AudioReader`, which mutates the `PlaybackDirector` via `Arc<Mutex<>>`.
 
-## Code Style Guidelines
+## Key Directories
 
-- Breaking changes are allowed because the app is not released yet; no migration is needed when implementing new
-  features or changes. There is currently NO user which uses this!!!
-- `cargo run` hangs until the process gets killed, thus always start the application in the background using `nohup`
-- **Error Handling**: Use `Result<T, Box<dyn std::error::Error>>` for fallible functions
-- **Async**: Use tokio runtime, prefer async/await over blocking operations
-- **Channels**: Use crossbeam-channel for thread communication, tokio channels for async
-- **Logging**: Use log crate with env_logger, structured logging with context
-- **Naming**: snake_case for variables/functions, PascalCase for structs/enums
-- **Logging**: Use the `log` crate with `env_logger` for logging.
+| Directory | Purpose |
+|-----------|---------|
+| `src/` | All Rust source files — flat structure, no submodules |
+| `e2e/` | End-to-end test scripts (bash + curl + jq) |
+| `docs/` | User-facing documentation (configuration.md, general.md) |
+| `container-data/` | Default config baked into Docker images |
 
-## Code Quality Principles
+## Development Commands
 
-### Modularity
+```bash
+# Build
+cargo build
+cargo build --release          # standard release (debug symbols)
+cargo build --profile production  # optimized: LTO, codegen-units=1, stripped
 
-- Structure code into small, focused rust files without using rust modules
-- Each file should encapsulate a single responsibility or closely related functionalities.
-- Promote reusability and ease of testing by isolating components.
+# Run (application blocks until killed)
+cargo run -- --config config.toml
 
-### SOLID Principles
+# Test
+cargo test                      # all unit tests
+cargo test <test_name>          # specific test
+./e2e/test.sh                   # 16 E2E tests (requires running server on port 3002)
+./e2e/test_sync.sh              # 4 multi-listener sync tests (self-manages server)
 
-- Follow the SOLID object-oriented design principles to ensure maintainable and extensible code.
-- Emphasize single responsibility, open-closed, Liskov substitution, interface segregation, and dependency inversion
-  where applicable.
+# Lint & Format
+cargo clippy
+cargo fmt
+```
 
-### Clean Code
+## Code Conventions & Common Patterns
 
-- Write clear, readable, and straightforward code.
-- Use descriptive names and avoid clever tricks or shortcuts that hinder comprehensibility.
-- Keep functions and files focused and concise.
-- YAGNI - You Aren't Gonna Need It: Avoid adding functionality until it is necessary.
-- Don't write unused code for future features.
+### Error Handling
+- Functions return `Result<T, Box<dyn std::error::Error + Send + Sync>>` for fallible operations.
+- Avoid bare `.expect()` / `.unwrap()` in production paths — prefer `?` propagation.
 
-## Dependency Management
+### Async Runtime
+- `#[tokio::main]` entry point with `features = ["full"]`.
+- Use `tokio::spawn` for background tasks; `tokio::select!` for awaiting termination.
+- Blocking I/O (file reads, FFmpeg subprocess) runs on dedicated threads, communicating via channels.
 
-- Avoid introducing additional dependencies unless absolutely necessary.
-- Prefer standard Rust libraries and built-in features to minimize external package usage.
-- Evaluate trade-offs before adding any third-party crate.
+### Channel Strategy
+- **crossbeam-channel** for thread-to-async communication (e.g., schedule commands → AudioReader).
+- **tokio::sync::watch** for one-to-many broadcasts (e.g., `PlaybackDirector` → HTTP server for `/current` metadata).
+- **tokio::sync::mpsc** (unbounded) for per-listener audio chunk delivery from `FanoutBuffer`.
 
-## Formatting and Linting
+### Shared State
+- `Arc<RwLock<T>>` for read-heavy shared state (`FanoutBuffer`).
+- `Arc<Mutex<T>>` for mutation-heavy shared state (`PlaybackDirector`).
+- `Arc<Vec<T>>` for immutable shared configuration.
 
-- Always run code formatters (`cargo fmt`) and linters (`cargo clippy`) before committing.
-- Maintain consistent code style across the project to improve readability and reduce friction in reviews.
+### Naming
+- `snake_case` for variables, functions, modules.
+- `PascalCase` for structs, enums, type aliases.
+- Files are named in `snake_case`.
 
-## Testing Practices
+### Logging
+- Use the `log` crate (`info!`, `warn!`, `error!`, `debug!`) with `env_logger`.
+- Log messages are structured and include contextual detail.
 
-### Test-Driven Development (TDD)
+### Configuration
+- TOML format, deserialized via `serde` into typed structs in `config.rs`.
+- `Config::validate()` called at startup; panics on invalid config (fail-fast).
+- Stream names: alphanumeric plus underscore/hyphen only.
 
-- When it makes sense, write tests before coding the functionality.
-- Use tests to drive design decisions and ensure robust feature implementation.
+### Testing Patterns
+- Unit tests are inline in source files using `#[cfg(test)]` modules.
+- Use `tempfile` crate for filesystem isolation in tests.
+- E2E tests use bash scripts with an accumulator pattern (`P=0; F=0`), curl for HTTP, jq for JSON assertions.
+- CI config at `e2e/ci-config.toml` disables shuffle, uses port 3002.
 
-### Behavior-Driven Development (BDD)
+## Important Files
 
-- Write tests in a BDD style, focusing on the expected behavior and outcomes.
-- Structure tests to clearly state scenarios, actions, and expected results to improve communication and documentation.
+| File | Role |
+|------|------|
+| `src/main.rs` | Entry point — module declarations, `StreamPipeline` struct, full startup sequence |
+| `src/config.rs` | TOML config model — `Config`, `ServerConfig`, `LibraryConfig`, `StationConfig`, `StreamConfig`, `ScheduleConfig`, `ScheduleProgram` |
+| `src/cli.rs` | CLI parser — single `-c/--config` option, default `./config.toml` |
+| `src/audio_processor.rs` | FFmpeg subprocess wrapper — format mapping, transcoding, idle detection |
+| `src/audio_reader.rs` | Playlist builder + schedule command service |
+| `src/playback_director.rs` | Timeline engine — track advancement, snapshot broadcasting |
+| `src/fanout_buffer.rs` | Ring buffer — chunk storage, per-listener cursors, eviction |
+| `src/server_icecast.rs` | Warp HTTP server — Icecast routes, listener tracking, info page |
+| `src/server_swagger.rs` | Swagger UI + OpenAPI spec routes |
+| `src/schedule_engine.rs` | Cron-based scheduling — program validation, next-event calculation |
+| `src/library_scanner.rs` | Audio file discovery — full and incremental scans, ffprobe duration |
+| `src/library_db.rs` | SQLite layer — rusqlite + r2d2 pool, WAL mode, batch operations |
+| `src/hearthis_client.rs` | Hearthis.at API client — feed/genre endpoints, random track selection |
+| `src/m3u_parser.rs` | M3U playlist parser — relative/absolute paths, validation |
+| `src/audio_metadata.rs` | Track metadata extraction — audiotags + ICY/JSON formatting |
+| `config.toml.example` | Annotated example with all options documented |
+| `Cargo.toml` | Dependencies, `[profile.production]` for optimized builds |
+| `Containerfile` | Multi-stage Docker build (FFmpeg static + Rust musl-cross → scratch) |
 
-### E2E Testing
+## Runtime & Tooling Preferences
 
-- End-to-end tests are located in `e2e/` directory
-- Tests use bash scripts with curl and jq
-- Run `./e2e/test.sh` to execute basic test suite (6 tests total)
-- Tests cover HTTP endpoints, Icecast headers, streaming, and buffer status
+- **Rust edition**: 2021
+- **Async runtime**: tokio (full features)
+- **HTTP framework**: warp 0.3
+- **Database**: SQLite via rusqlite 0.37 (bundled) with r2d2 connection pool (max_size=5)
+- **Templating**: minijinja 2.12 (info page HTML)
+- **External dependency**: FFmpeg binary required at runtime (path configurable via `ffmpeg_path` in config or `FFMPEG_PATH` env var)
+- **Allocator**: mimalloc
+- **Containerization**: Multi-stage Docker build targeting `scratch` with static musl binary
 
-## Available Tools
+## Testing & QA
 
-- If needed use Context7 and Online Search to clarify dependency APIs or implementation details or example usages
-- Do NOT use sudo, ask me for executing commands if needed!
-- Use `pkill funkstrom` to kill the application if it is already running
+### Unit Tests
+- Co-located with source in `#[cfg(test)]` modules.
+- Run with `cargo test`.
+- Use `tempfile` for temporary directories and files.
 
-## Warnings
+### E2E Tests
+- Bash scripts in `e2e/`.
+- `test.sh` (16 tests): requires a pre-started server on port 3002 with `ci-config.toml`. Covers status endpoint, streaming, ICY headers, listener counting, multi-format streams.
+- `test_sync.sh` (4 tests): self-manages server lifecycle. Covers same-stream sync delivery, idle timeline advancement, metadata persistence across idle periods.
+- Both use curl for HTTP requests and jq for JSON assertions.
 
-- `cargo run` hangs until the process gets killed, thus always start the application in the background using `nohup`
+### CI
+- `e2e/ci-config.toml` provides deterministic test configuration (shuffle off, repeat on, fixed port 3002).
