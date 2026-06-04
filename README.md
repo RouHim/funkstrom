@@ -197,6 +197,22 @@ All configuration is done via the `config.toml` file:
 
 You can also set `RUST_LOG` environment variable for logging (trace, debug, info, warn, error).
 
+
+## End-to-End Tests
+
+```bash
+# Start the server first (first run compiles, ~20s)
+nohup cargo run -- --config e2e/ci-config.toml &
+
+# Basic suite (16 tests)
+./e2e/test.sh
+
+# Multi-listener sync suite (starts its own server, ~2min)
+./e2e/test_sync.sh
+```
+
+Both use `e2e/ci-config.toml` (port 3002). Requires `curl`, `jq`, and a `test_music` directory.
+
 ## API Endpoints
 
 - **`GET /`** - Web interface with station info and current track
