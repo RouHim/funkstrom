@@ -118,6 +118,7 @@ impl FanoutBuffer {
         chunk
     }
 
+    #[allow(dead_code)]
     pub fn new_cursor(&self) -> ListenerCursor {
         ListenerCursor {
             next_seq: self.next_seq,

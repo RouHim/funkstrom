@@ -12,6 +12,7 @@ pub struct TrackMetadata {
 
 impl TrackMetadata {
     /// Extract metadata from an audio file
+    #[allow(dead_code)]
     pub fn from_file(path: &Path) -> Self {
         let file_path = path.to_string_lossy().to_string();
 
@@ -53,6 +54,7 @@ impl TrackMetadata {
     }
 
     /// Create metadata from filename when tags are unavailable
+    #[allow(dead_code)]
     fn from_filename(path: &Path) -> Self {
         let title = Self::default_title(path);
         let file_path = path.to_string_lossy().to_string();
@@ -66,6 +68,7 @@ impl TrackMetadata {
     }
 
     /// Get default title from filename
+    #[allow(dead_code)]
     fn default_title(path: &Path) -> String {
         path.file_stem()
             .and_then(|s| s.to_str())

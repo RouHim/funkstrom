@@ -29,6 +29,7 @@ pub struct PlaybackDirector {
     pub track_started_at: Instant,
     pub generation: u64,
     pub snapshot_tx: watch::Sender<TimelineSnapshot>,
+    #[allow(dead_code)]
     pub listener_count: Arc<AtomicUsize>,
 }
 
@@ -69,6 +70,7 @@ impl PlaybackDirector {
         }
     }
 
+    #[allow(dead_code)]
     pub fn current_snapshot(&self) -> TimelineSnapshot {
         self.snapshot_tx.borrow().clone()
     }
