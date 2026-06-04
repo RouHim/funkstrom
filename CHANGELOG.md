@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/RouHim/funkstrom/compare/1.2.0...1.2.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* remove initial ICY metadata block that misaligned byte counters ([a61ca40](https://github.com/RouHim/funkstrom/commit/a61ca400c29790c35e2095e5ccfbf4e7fa2922fe))
+
 # [1.2.0](https://github.com/RouHim/funkstrom/compare/1.1.2...1.2.0) (2026-06-04)
 
 
