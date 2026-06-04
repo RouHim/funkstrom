@@ -2,13 +2,16 @@ use crate::fanout_buffer::SharedFanoutBuffer;
 use crate::playback_director::TimelineSnapshot;
 use crate::server_swagger;
 use bytes::Bytes;
-use minijinja::Environment;
+
+use futures_core::Stream;
 use serde::Serialize;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{mpsc, watch};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::{http::HeaderMap, Filter, Reply};
 
 // JSON response structures for serialization
@@ -175,6 +178,62 @@ fn process_audio_with_icy(
         }
     }
     output
+}
+
+/// Inline replacement for `tokio_stream::wrappers::UnboundedReceiverStream`.
+struct UnboundedReceiverStream<T> {
+    rx: UnboundedReceiver<T>,
+}
+
+impl<T> UnboundedReceiverStream<T> {
+    fn new(rx: UnboundedReceiver<T>) -> Self {
+        Self { rx }
+    }
+}
+
+impl<T> Stream for UnboundedReceiverStream<T> {
+    type Item = T;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        self.get_mut().rx.poll_recv(cx)
+    }
+}
+
+/// Render the info page HTML from a minijinja-style template using simple string replacement.
+fn render_info_page(ctx: &InfoPageContext, template: &str) -> String {
+    let mut html = template.to_owned();
+
+    // Process {% for stream in streams %}...{% endfor %} blocks
+    while let Some(start) = html.find("{% for stream in streams %}") {
+        let body_start = start + "{% for stream in streams %}".len();
+        let end = html[body_start..]
+            .find("{% endfor %}")
+            .map(|p| body_start + p)
+            .expect("missing {% endfor %} in template");
+        let inner = html[body_start..end].to_owned();
+
+        let mut replacement = String::new();
+        for stream in &ctx.streams {
+            replacement.push_str(
+                &inner
+                    .replace("{{ stream.name }}", &stream.name)
+                    .replace("{{ stream.bitrate }}", &stream.bitrate.to_string())
+                    .replace("{{ stream.url }}", &stream.url),
+            );
+        }
+
+        let endfor_end = end + "{% endfor %}".len();
+        html.replace_range(start..endfor_end, &replacement);
+    }
+
+    html.replace("{{ station_name }}", &ctx.station_name)
+        .replace("{{ first_stream }}", &ctx.first_stream)
+        .replace("{{ station_genre }}", &ctx.station_genre)
+        .replace("{{ station_description }}", &ctx.station_description)
+        .replace("{{ current_track }}", &ctx.current_track)
+        .replace("{{ album }}", &ctx.album)
+        .replace("{{ bitrate }}", &ctx.bitrate.to_string())
+        .replace("{{ bind_address }}", &ctx.bind_address)
+        .replace("{{ port }}", &ctx.port.to_string())
 }
 
 impl IcecastServer {
@@ -441,7 +500,7 @@ impl IcecastServer {
         }
 
         let response = response_builder
-            .body(hyper::Body::wrap_stream(stream))
+            .body(warp::hyper::Body::wrap_stream(stream))
             .map_err(|e| {
                 log::error!("Failed to build HTTP response: {}", e);
                 warp::reject::reject()
@@ -566,22 +625,7 @@ impl IcecastServer {
         };
 
         const TEMPLATE_STR: &str = include_str!("../templates/info.html");
-
-        let mut env = Environment::new();
-        env.add_template("info", TEMPLATE_STR).map_err(|e| {
-            log::error!("Template error: {}", e);
-            warp::reject::reject()
-        })?;
-
-        let tmpl = env.get_template("info").map_err(|e| {
-            log::error!("Template get error: {}", e);
-            warp::reject::reject()
-        })?;
-
-        let rendered = tmpl.render(&context).map_err(|e| {
-            log::error!("Render error: {}", e);
-            warp::reject::reject()
-        })?;
+        let rendered = render_info_page(&context, TEMPLATE_STR);
 
         Ok(warp::reply::with_header(
             rendered,

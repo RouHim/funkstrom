@@ -5,9 +5,8 @@ use crate::playback_director::{PlaybackDirector, TrackInfo};
 use crate::schedule_engine::PlaylistCommand;
 use chrono::Duration;
 use crossbeam_channel::{Receiver, TryRecvError};
+use fastrand::Rng as FastRng;
 use log::{error, info, warn};
-use rand::prelude::*;
-use rand::rngs::StdRng;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -90,8 +89,8 @@ impl AudioReader {
             .collect();
 
         if self.library_shuffle {
-            let mut rng = StdRng::seed_from_u64(self.shuffle_seed);
-            playlist.shuffle(&mut rng);
+            let mut rng = FastRng::with_seed(self.shuffle_seed);
+            rng.shuffle(&mut playlist);
         }
 
         playlist
@@ -153,9 +152,9 @@ impl AudioReader {
                             duration,
                         };
 
-                        tokio::spawn(async move {
+                        tokio::task::spawn_blocking(move || {
                             let result = match HearthisClient::new() {
-                                Ok(client) => match client.get_random_liveset(&genres).await {
+                                Ok(client) => match client.get_random_liveset(&genres) {
                                     Ok(track) => {
                                         info!(
                                             "Fetched liveset: '{}' by {} ({})",

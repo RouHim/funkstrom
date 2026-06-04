@@ -61,16 +61,18 @@ pub struct HearthisUser {
 }
 
 pub struct HearthisClient {
-    client: reqwest::Client,
+    agent: ureq::Agent,
 }
 
 impl HearthisClient {
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()?;
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(30)))
+            .http_status_as_error(false)
+            .build()
+            .new_agent();
 
-        Ok(Self { client })
+        Ok(Self { agent })
     }
 
     /// Fetches a random liveset from the specified genres.
@@ -89,36 +91,37 @@ impl HearthisClient {
     /// # Returns
     ///
     /// A random track selected from the available results (up to 20 tracks per query).
-    pub async fn get_random_liveset(
+    pub fn get_random_liveset(
         &self,
         genres: &[String],
     ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         if genres.is_empty() {
             // Fetch from general feed (popular/recent tracks across all genres)
-            self.fetch_random_from_feed().await
+            self.fetch_random_from_feed()
         } else {
             // Try each genre until we find one with tracks
-            self.fetch_random_from_genres(genres).await
+            self.fetch_random_from_genres(genres)
         }
     }
 
-    async fn fetch_random_from_feed(
+    fn fetch_random_from_feed(
         &self,
     ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         let url = format!("{}/feed/?page=1&count=20", HEARTHIS_API_BASE);
 
         debug!("Fetching tracks from feed: {}", url);
 
-        let response = self.client.get(&url).send().await?;
+        let mut response = self.agent.get(&url).call()?;
+        let status = response.status();
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            error!("API error {}: {}", status, body);
-            return Err(format!("HTTP {} - {}", status, body).into());
+        let code = status.as_u16();
+        if !(200..300).contains(&code) {
+            let body = response.body_mut().read_to_string().unwrap_or_default();
+            error!("API error {}: {}", code, body);
+            return Err(format!("HTTP {} - {}", code, body).into());
         }
 
-        let tracks: Vec<HearthisTrack> = response.json().await?;
+        let tracks: Vec<HearthisTrack> = response.body_mut().read_json()?;
 
         if tracks.is_empty() {
             return Err("No tracks found in feed".into());
@@ -133,13 +136,13 @@ impl HearthisClient {
         Ok(track)
     }
 
-    async fn fetch_random_from_genres(
+    fn fetch_random_from_genres(
         &self,
         genres: &[String],
     ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
         // Try each genre in the list
         for genre in genres {
-            match self.fetch_from_genre(genre).await {
+            match self.fetch_from_genre(genre) {
                 Ok(track) => {
                     info!(
                         "Selected random '{}' track: '{}' by {}",
@@ -159,10 +162,10 @@ impl HearthisClient {
             "All specified genres failed, falling back to general feed: {:?}",
             genres
         );
-        self.fetch_random_from_feed().await
+        self.fetch_random_from_feed()
     }
 
-    async fn fetch_from_genre(
+    fn fetch_from_genre(
         &self,
         genre: &str,
     ) -> Result<HearthisTrack, Box<dyn std::error::Error + Send + Sync>> {
@@ -176,16 +179,16 @@ impl HearthisClient {
 
         debug!("Fetching tracks from genre '{}': {}", genre, url);
 
-        let response = self.client.get(&url).send().await?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            error!("API error {} for genre '{}': {}", status, genre, body);
-            return Err(format!("HTTP {} - {}", status, body).into());
+        let mut response = self.agent.get(&url).call()?;
+        let status = response.status();
+        let code = status.as_u16();
+        if !(200..300).contains(&code) {
+            let body = response.body_mut().read_to_string().unwrap_or_default();
+            error!("API error {} for genre '{}': {}", code, genre, body);
+            return Err(format!("HTTP {} - {}", code, body).into());
         }
 
-        let tracks: Vec<HearthisTrack> = response.json().await?;
+        let tracks: Vec<HearthisTrack> = response.body_mut().read_json()?;
 
         if tracks.is_empty() {
             return Err(format!("No tracks found in genre '{}'", genre).into());
@@ -194,8 +197,7 @@ impl HearthisClient {
         Ok(Self::select_random_track(&tracks))
     }
     fn select_random_track(tracks: &[HearthisTrack]) -> HearthisTrack {
-        use rand::Rng;
-        let index = rand::thread_rng().gen_range(0..tracks.len());
+        let index = fastrand::usize(0..tracks.len());
         tracks[index].clone()
     }
 }
@@ -235,11 +237,11 @@ mod tests {
         assert!(track.id == "1" || track.id == "2");
     }
 
-    #[tokio::test]
-    async fn given_api_available_when_fetching_from_feed_then_returns_track() {
+    #[test]
+    fn given_api_available_when_fetching_from_feed_then_returns_track() {
         let client = HearthisClient::new().unwrap();
 
-        let result = client.fetch_random_from_feed().await;
+        let result = client.fetch_random_from_feed();
 
         // This test requires internet connection
         match result {
@@ -254,11 +256,11 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn given_techno_genre_when_fetching_then_returns_techno_track() {
+    #[test]
+    fn given_techno_genre_when_fetching_then_returns_techno_track() {
         let client = HearthisClient::new().unwrap();
 
-        let result = client.fetch_from_genre("techno").await;
+        let result = client.fetch_from_genre("techno");
 
         match result {
             Ok(track) => {
@@ -275,12 +277,12 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn given_multiple_genres_when_getting_random_liveset_then_returns_matching_track() {
+    #[test]
+    fn given_multiple_genres_when_getting_random_liveset_then_returns_matching_track() {
         let client = HearthisClient::new().unwrap();
         let genres = vec!["techno".to_string(), "house".to_string()];
 
-        let result = client.get_random_liveset(&genres).await;
+        let result = client.get_random_liveset(&genres);
 
         match result {
             Ok(track) => {
@@ -297,12 +299,12 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn given_empty_genres_when_getting_random_liveset_then_returns_from_feed() {
+    #[test]
+    fn given_empty_genres_when_getting_random_liveset_then_returns_from_feed() {
         let client = HearthisClient::new().unwrap();
         let genres: Vec<String> = vec![];
 
-        let result = client.get_random_liveset(&genres).await;
+        let result = client.get_random_liveset(&genres);
 
         match result {
             Ok(track) => {
