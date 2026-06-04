@@ -78,7 +78,7 @@ The `[server]` section controls network binding and system paths.
 ### Options
 
 | Option         | Type    | Required | Default    | Description                           |
-|----------------|---------|----------|------------|---------------------------------------|
+| -------------- | ------- | -------- | ---------- | ------------------------------------- |
 | `port`         | integer | Yes      | -          | Port number for HTTP server (1-65535) |
 | `bind_address` | string  | Yes      | -          | IP address to bind to                 |
 | `ffmpeg_path`  | string  | No       | `"ffmpeg"` | Path to ffmpeg binary                 |
@@ -98,9 +98,9 @@ accessible on this port.
 The network interface address to bind to. This controls which network interfaces the server listens on.
 
 - **Values**:
-    - `"127.0.0.1"` - Listen only on localhost (local access only)
-    - `"0.0.0.0"` - Listen on all network interfaces (remote access allowed)
-    - Specific IP - Listen only on a specific interface
+  - `"127.0.0.1"` - Listen only on localhost (local access only)
+  - `"0.0.0.0"` - Listen on all network interfaces (remote access allowed)
+  - Specific IP - Listen only on a specific interface
 - **Security note**: Use `127.0.0.1` for development or when using a reverse proxy
 
 #### `ffmpeg_path`
@@ -110,9 +110,9 @@ variable.
 
 - **When to use**: Specify when ffmpeg is installed in a non-standard location
 - **Examples**:
-    - `"/usr/bin/ffmpeg"`
-    - `"/opt/ffmpeg/bin/ffmpeg"`
-    - `"/home/user/.local/bin/ffmpeg"`
+  - `"/usr/bin/ffmpeg"`
+  - `"/opt/ffmpeg/bin/ffmpeg"`
+  - `"/home/user/.local/bin/ffmpeg"`
 
 ### Example
 
@@ -130,7 +130,7 @@ The `[library]` section defines your music collection and playback behavior.
 ### Options
 
 | Option            | Type    | Required | Default | Description               |
-|-------------------|---------|----------|---------|---------------------------|
+| ----------------- | ------- | -------- | ------- | ------------------------- |
 | `music_directory` | string  | Yes      | -       | Path to music files       |
 | `shuffle`         | boolean | Yes      | -       | Shuffle playback order    |
 | `repeat`          | boolean | Yes      | -       | Repeat when playlist ends |
@@ -152,8 +152,8 @@ audio files.
 Controls whether tracks are played in random order or sequentially by filename.
 
 - **Values**:
-    - `true` - Randomize playback order (recommended for music variety)
-    - `false` - Play tracks in alphabetical/directory order
+  - `true` - Randomize playback order (recommended for music variety)
+  - `false` - Play tracks in alphabetical/directory order
 - **Behavior**: Shuffle order is maintained in the database and consistent across restarts
 
 #### `repeat`
@@ -161,8 +161,8 @@ Controls whether tracks are played in random order or sequentially by filename.
 Controls whether playback loops back to the beginning when all tracks have been played.
 
 - **Values**:
-    - `true` - Restart from beginning when reaching the end (recommended for continuous streaming)
-    - `false` - Stop playback when all tracks are exhausted
+  - `true` - Restart from beginning when reaching the end (recommended for continuous streaming)
+  - `false` - Stop playback when all tracks are exhausted
 - **Use case**: Set to `true` for 24/7 operation
 
 ### Example
@@ -180,12 +180,12 @@ The `[station]` section provides metadata about your radio station that is sent 
 
 ### Options
 
-| Option         | Type   | Required | Default | Description          |
-|----------------|--------|----------|---------|----------------------|
-| `name`         | string | Yes      | -       | Station display name |
-| `description`  | string | Yes      | -       | Station description  |
-| `genre`        | string | Yes      | -       | Music genre category |
-| `url`          | string | Yes      | -       | Station website URL  |
+| Option        | Type   | Required | Default | Description          |
+| ------------- | ------ | -------- | ------- | -------------------- |
+| `name`        | string | Yes      | -       | Station display name |
+| `description` | string | Yes      | -       | Station description  |
+| `genre`       | string | Yes      | -       | Music genre category |
+| `url`         | string | Yes      | -       | Station website URL  |
 
 ### Details
 
@@ -216,8 +216,8 @@ The web URL where listeners can find more information about your station.
 
 - **Format**: Full URL including protocol
 - **Examples**:
-    - `"http://localhost:8284"` (for local testing)
-    - `"https://radio.example.com"`
+  - `"http://localhost:8284"` (for local testing)
+  - `"https://radio.example.com"`
 
 ### Example
 
@@ -246,7 +246,7 @@ Each stream is defined with a unique name that becomes part of its URL:
 ### Options
 
 | Option        | Type    | Required | Default | Description              |
-|---------------|---------|----------|---------|--------------------------|
+| ------------- | ------- | -------- | ------- | ------------------------ |
 | `bitrate`     | integer | Yes      | -       | Audio bitrate in kbps    |
 | `format`      | string  | Yes      | -       | Audio codec format       |
 | `sample_rate` | integer | Yes      | -       | Sample rate in Hz        |
@@ -261,10 +261,10 @@ The audio bitrate in kilobits per second (kbps). Higher bitrate = better quality
 
 - **Valid range**: 32-320 kbps
 - **Recommended values**:
-    - **32-64 kbps**: Mobile/low bandwidth (acceptable for speech)
-    - **96-128 kbps**: Standard quality (good for most music)
-    - **192-256 kbps**: High quality (excellent for all content)
-    - **320 kbps**: Maximum quality (audiophile, high bandwidth)
+  - **32-64 kbps**: Mobile/low bandwidth (acceptable for speech)
+  - **96-128 kbps**: Standard quality (good for most music)
+  - **192-256 kbps**: High quality (excellent for all content)
+  - **320 kbps**: Maximum quality (audiophile, high bandwidth)
 
 #### `format`
 
@@ -272,10 +272,10 @@ The audio codec used for encoding the stream.
 
 - **Supported formats**: `mp3`, `aac`, `opus`, `ogg`
 - **Format characteristics**:
-    - **mp3**: Universal compatibility, good quality at higher bitrates
-    - **aac**: Better quality than MP3 at same bitrate, widely supported
-    - **opus**: Best quality at low bitrates, modern browsers only
-    - **ogg**: Open format, good quality, limited player support
+  - **mp3**: Universal compatibility, good quality at higher bitrates
+  - **aac**: Better quality than MP3 at same bitrate, widely supported
+  - **opus**: Best quality at low bitrates, modern browsers only
+  - **ogg**: Open format, good quality, limited player support
 
 #### `sample_rate`
 
@@ -283,18 +283,18 @@ The audio sample rate in Hertz. Higher sample rate = better frequency response.
 
 - **Valid values**: `8000`, `11025`, `16000`, `22050`, `32000`, `44100`, `48000`
 - **Common choices**:
-    - **8000-16000 Hz**: Voice/podcast only
-    - **22050 Hz**: Lower quality music, mobile streaming
-    - **44100 Hz**: CD quality, standard for music
-    - **48000 Hz**: Professional quality, modern standard
+  - **8000-16000 Hz**: Voice/podcast only
+  - **22050 Hz**: Lower quality music, mobile streaming
+  - **44100 Hz**: CD quality, standard for music
+  - **48000 Hz**: Professional quality, modern standard
 
 #### `channels`
 
 Number of audio channels in the output.
 
 - **Valid values**:
-    - `1` - Mono (single channel, saves bandwidth)
-    - `2` - Stereo (two channels, full spatial audio)
+  - `1` - Mono (single channel, saves bandwidth)
+  - `2` - Stereo (two channels, full spatial audio)
 - **Recommendation**: Use stereo (2) for music, mono (1) for voice or to reduce bandwidth
 
 #### `enabled`
@@ -302,8 +302,8 @@ Number of audio channels in the output.
 Whether this stream is active and available to listeners.
 
 - **Values**:
-    - `true` - Stream is active and accessible
-    - `false` - Stream is disabled (config preserved but not running)
+  - `true` - Stream is active and accessible
+  - `false` - Stream is disabled (config preserved but not running)
 - **Requirement**: At least one stream must be enabled
 
 ### Validation Rules
@@ -391,7 +391,7 @@ programs = [...]  # Array of program configurations
 ### Program Options
 
 | Option     | Type    | Required    | Default      | Description                                    |
-|------------|---------|-------------|--------------|------------------------------------------------|
+| ---------- | ------- | ----------- | ------------ | ---------------------------------------------- |
 | `name`     | string  | Yes         | -            | Program display name                           |
 | `active`   | boolean | Yes         | -            | Enable/disable program                         |
 | `cron`     | string  | Yes         | -            | Cron schedule expression                       |
@@ -413,8 +413,8 @@ A descriptive name for the program, used in logs and status displays.
 Whether this program is enabled for scheduling.
 
 - **Values**:
-    - `true` - Program will run according to schedule
-    - `false` - Program is disabled (config preserved but not scheduled)
+  - `true` - Program will run according to schedule
+  - `false` - Program is disabled (config preserved but not scheduled)
 - **Use case**: Temporarily disable programs without deleting configuration
 
 #### `cron`
@@ -423,11 +423,11 @@ A cron expression defining when the program should start.
 
 - **Format**: `"minute hour day month weekday"`
 - **Examples**:
-    - `"0 6 * * 1-5"` - 6:00 AM Monday through Friday
-    - `"0 19 * * *"` - 7:00 PM every day
-    - `"0 22 * * 5,6"` - 10:00 PM on Friday and Saturday
-    - `"0 14 * * 6"` - 2:00 PM on Saturdays
-    - `"*/30 * * * *"` - Every 30 minutes
+  - `"0 6 * * 1-5"` - 6:00 AM Monday through Friday
+  - `"0 19 * * *"` - 7:00 PM every day
+  - `"0 22 * * 5,6"` - 10:00 PM on Friday and Saturday
+  - `"0 14 * * 6"` - 2:00 PM on Saturdays
+  - `"*/30 * * * *"` - Every 30 minutes
 - **Validation**: Cron expression is validated on startup; invalid expressions cause program to be skipped
 
 #### `duration`
@@ -437,10 +437,10 @@ How long the program should run before returning to regular library playback.
 - **Format**: Time string with single unit only
 - **Valid units**: `m` (minutes) or `h` (hours)
 - **Examples**:
-    - `"30m"` - 30 minutes
-    - `"2h"` - 2 hours
-    - `"45m"` - 45 minutes
-    - `"90m"` - 90 minutes (1.5 hours)
+  - `"30m"` - 30 minutes
+  - `"2h"` - 2 hours
+  - `"45m"` - 45 minutes
+  - `"90m"` - 90 minutes (1.5 hours)
 - **IMPORTANT**: Combined formats like `"1h30m"` are NOT supported. Use minutes only for such durations (e.g., `"90m"`).
 
 #### `type`
@@ -448,8 +448,8 @@ How long the program should run before returning to regular library playback.
 The type of scheduled program.
 
 - **Values**:
-    - `"playlist"` (default) - Plays tracks from local M3U playlist file
-    - `"liveset"` - Fetches and streams livesets from hearthis.at API
+  - `"playlist"` (default) - Plays tracks from local M3U playlist file
+  - `"liveset"` - Fetches and streams livesets from hearthis.at API
 - **Behavior**: If not specified, defaults to `"playlist"`
 
 #### `playlist`
@@ -469,9 +469,9 @@ Array of music genres to fetch from hearthis.at (required for liveset programs).
 - **Empty array behavior**: Use `[]` to fetch from general feed (all genres)
 - **Fallback**: If no tracks found in specified genres, falls back to general feed
 - **Examples**:
-    - `["techno", "house"]`
-    - `["deephouse", "progressivehouse"]`
-    - `[]` (general feed)
+  - `["techno", "house"]`
+  - `["deephouse", "progressivehouse"]`
+  - `[]` (general feed)
 
 ### Available Hearthis.at Genres
 
@@ -624,6 +624,7 @@ Funkstrom supports standard M3U and Extended M3U playlist formats for scheduled 
 ### Path Resolution
 
 1. **Absolute paths:** Used as-is
+
    ```
    /home/user/music/track1.mp3
    /var/radio/shows/episode1.mp3
@@ -695,7 +696,7 @@ Funkstrom exposes several HTTP endpoints for streaming and monitoring.
 ### Endpoints
 
 | Endpoint         | Method | Description                               | Content Type                    |
-|------------------|--------|-------------------------------------------|---------------------------------|
+| ---------------- | ------ | ----------------------------------------- | ------------------------------- |
 | `/<stream_name>` | GET    | Audio stream (e.g., `/high`, `/standard`) | `audio/mpeg`, `audio/aac`, etc. |
 | `/status`        | GET    | Server status and buffer information      | `application/json`              |
 | `/current`       | GET    | Currently playing track metadata          | `application/json`              |
@@ -856,8 +857,8 @@ Without a persistent `/app/data/` mount, Funkstrom will perform a full library s
 
 #### What's Stored in `/app/data/`
 
-| File | Purpose |
-|------|---------|
+| File          | Purpose                                                                             |
+| ------------- | ----------------------------------------------------------------------------------- |
 | `database.db` | SQLite database with track metadata, file paths, shuffle state, and scan timestamps |
 
 #### Docker Run
