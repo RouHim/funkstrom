@@ -223,6 +223,97 @@ else
     ((FAIL++))
 fi
 
+
+# Test 17: ICY metadata header present when requested
+echo "Test 17: ICY metadata header present when requested"
+HEADERS_FILE=$(mktemp)
+timeout 3 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -D "$HEADERS_FILE" -o /dev/null 2>/dev/null || true
+if grep -qi "icy-metaint: 16000" "$HEADERS_FILE"; then
+    echo "  PASS"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: icy-metaint header missing"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$HEADERS_FILE"
+
+# Test 18: ICY metadata header absent when not requested
+echo "Test 18: ICY metadata header absent when not requested"
+HEADERS_FILE=$(mktemp)
+timeout 3 curl -s -N "${BASE_URL}/stream" -D "$HEADERS_FILE" -o /dev/null 2>/dev/null || true
+if grep -qi "icy-metaint" "$HEADERS_FILE"; then
+    echo "  FAIL: icy-metaint present without request"
+    FAIL=$((FAIL + 1))
+else
+    echo "  PASS"
+    PASS=$((PASS + 1))
+fi
+rm -f "$HEADERS_FILE"
+
+# Test 19: Initial metadata block contains StreamTitle and StreamUrl
+echo "Test 19: Initial metadata block contains StreamTitle and StreamUrl"
+DATA_FILE=$(mktemp)
+timeout 5 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2>/dev/null || true
+FIRST_BYTE=$(od -An -tx1 -N1 "$DATA_FILE" | tr -d ' ')
+if [ "$FIRST_BYTE" != "00" ]; then
+    # Non-zero first byte means a metadata block (count N). Read it.
+    BLOCKS=$((16#$FIRST_BYTE))
+    META_SIZE=$((1 + BLOCKS * 16))
+    META_CONTENT=$(dd if="$DATA_FILE" bs=1 count="$META_SIZE" 2>/dev/null | strings)
+    if echo "$META_CONTENT" | grep -q "StreamTitle=" && echo "$META_CONTENT" | grep -q "StreamUrl="; then
+        echo "  PASS: $META_CONTENT"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: metadata block missing StreamTitle/StreamUrl fields"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "  FAIL: initial byte is 0x00 (empty block, expected metadata)"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$DATA_FILE"
+
+# Test 20: Metadata block injected at metaint boundary
+echo "Test 20: Metadata block injected at metaint boundary"
+DATA_FILE=$(mktemp)
+timeout 8 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2>/dev/null || true
+# Determine initial metadata block size
+FIRST_BYTE=$(od -An -tx1 -N1 "$DATA_FILE" | tr -d ' ')
+INIT_BLOCKS=$((16#$FIRST_BYTE))
+INIT_META_SIZE=$((1 + INIT_BLOCKS * 16))
+# First metadata boundary is at INIT_META_SIZE + 16000
+BOUNDARY_POS=$((INIT_META_SIZE + 16000))
+META_BYTE=$(od -An -tx1 -j "$BOUNDARY_POS" -N1 "$DATA_FILE" | tr -d ' ')
+if [ -n "$META_BYTE" ]; then
+    echo "  PASS: metadata byte 0x$META_BYTE at position $BOUNDARY_POS"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: could not read metadata byte at boundary"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$DATA_FILE"
+
+# Test 21: ICY metadata matches /current endpoint track info
+echo "Test 21: ICY metadata matches /current endpoint track info"
+DATA_FILE=$(mktemp)
+timeout 5 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2>/dev/null || true
+CURRENT_JSON=$(curl -s "${BASE_URL}/current")
+CURRENT_ARTIST=$(echo "$CURRENT_JSON" | jq -r '.artist')
+CURRENT_TITLE=$(echo "$CURRENT_JSON" | jq -r '.title')
+EXPECTED_ICY="StreamTitle='${CURRENT_ARTIST} - ${CURRENT_TITLE}';StreamUrl='';"
+# Read initial metadata block
+FIRST_BYTE=$(od -An -tx1 -N1 "$DATA_FILE" | tr -d ' ')
+BLOCKS=$((16#$FIRST_BYTE))
+META_SIZE=$((1 + BLOCKS * 16))
+META_RAW=$(dd if="$DATA_FILE" bs=1 count="$META_SIZE" 2>/dev/null | strings | head -1)
+if [ "$META_RAW" = "$EXPECTED_ICY" ]; then
+    echo "  PASS: '$META_RAW'"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: got '$META_RAW', expected '$EXPECTED_ICY'"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$DATA_FILE"
 echo
 echo "=== Results ==="
 echo "Passed: $PASS"
