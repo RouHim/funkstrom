@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/RouHim/funkstrom/compare/1.2.1...1.2.2) (2026-06-04)
+
+
+### Bug Fixes
+
+* **cli:** add --help/-h handling to manual arg parser ([3304966](https://github.com/RouHim/funkstrom/commit/33049663ff0a334c41ae62aac2637ec66677a7fb))
+
 ## [1.2.1](https://github.com/RouHim/funkstrom/compare/1.2.0...1.2.1) (2026-06-04)
 
 
