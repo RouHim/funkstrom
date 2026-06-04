@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/RouHim/funkstrom/compare/1.1.2...1.2.0) (2026-06-04)
+
+
+### Features
+
+* inject ICY metadata into MP3/AAC streams, pass metadata to FFmpeg for OGG/FLAC ([83d3aae](https://github.com/RouHim/funkstrom/commit/83d3aaedec8b1a061d7b7cb3e72afb9049f5710e))
+
 ## [1.1.2](https://github.com/RouHim/funkstrom/compare/1.1.1...1.1.2) (2026-06-04)
 
 
