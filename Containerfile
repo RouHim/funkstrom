@@ -6,13 +6,19 @@ FROM alpine:latest AS ffmpeg-downloader
 ARG TARGETARCH
 
 # Download and extract static ffmpeg build for the target architecture
-RUN apk add --no-cache curl tar xz && \
+RUN apk add --no-cache curl tar xz file && \
     if [ "$TARGETARCH" = "arm64" ]; then \
         FFMPEG_ARCH="arm64"; \
     else \
         FFMPEG_ARCH="amd64"; \
     fi && \
-    curl -L -o ffmpeg-release.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz && \
+    for i in 1 2 3; do \
+        curl -fsSL --retry 2 --retry-delay 5 -A "Mozilla/5.0" -o ffmpeg-release.tar.xz \
+            https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${FFMPEG_ARCH}-static.tar.xz && \
+        file ffmpeg-release.tar.xz | grep -q "XZ compressed" && break; \
+        echo "Download attempt $i failed, retrying..."; \
+        sleep 2; \
+    done && \
     tar xf ffmpeg-release.tar.xz && \
     mv ffmpeg-*-${FFMPEG_ARCH}-static/ffmpeg /ffmpeg && \
     chmod +x /ffmpeg && \
