@@ -1,3 +1,28 @@
+# [1.1.0](https://github.com/RouHim/funkstrom/compare/1.0.6...1.1.0) (2026-06-04)
+
+
+### Bug Fixes
+
+* Add timeout to metadata curl requests in sync tests ([57012fb](https://github.com/RouHim/funkstrom/commit/57012fb539b265c2a047de0188550873d5c79bed))
+* **audio:** always pass -ss to ffmpeg to prevent mp3 muxer initial buffering delay ([72ff3ed](https://github.com/RouHim/funkstrom/commit/72ff3ede71f71824d7f2ba29b9e4b7e8f560a9f5))
+* **audio:** elevate FFmpeg error logging and fix backoff reset ([ac9bc56](https://github.com/RouHim/funkstrom/commit/ac9bc56ad5a6c2b88cbad65a9ab6d94cd5545165)), closes [#2](https://github.com/RouHim/funkstrom/issues/2) [Hi#Quality](https://github.com/Hi/issues/Quality)
+* **audio:** make encoding always-on regardless of listener count ([a410e73](https://github.com/RouHim/funkstrom/commit/a410e7359a142718c3f678d2ab46ea486637c290))
+* **audio:** prevent tokio thread starvation in multi-stream encoding ([709c6d9](https://github.com/RouHim/funkstrom/commit/709c6d954379a5c82d076220e7e90086920e6fdd))
+* **audio:** remove BufReader from FFmpeg stdout to prevent read starvation ([d6d0bbe](https://github.com/RouHim/funkstrom/commit/d6d0bbe1333ee4729a6aaf016159c627a1137677))
+* **ci:** remove prime stream endpoint step to fix e2e listener count tests ([c6780ab](https://github.com/RouHim/funkstrom/commit/c6780ab6e3c01d1bb167004bd5962263a3a461db))
+* **playback:** remove is_encoding_active gating from timeline ([7dda055](https://github.com/RouHim/funkstrom/commit/7dda05553f97ec5dffd23d8a4b75d2e23f551b62))
+* **ui:** prevent stream switching from restarting playback ([53ff62b](https://github.com/RouHim/funkstrom/commit/53ff62b4a3d17888acb0ea32898d9b4f0dd999ee))
+
+
+### Features
+
+* **audio:** pause FFmpeg when no listeners and wire through pipeline ([88715c7](https://github.com/RouHim/funkstrom/commit/88715c777c47e6658e34cc94f631788c9e3f07e4))
+* **buffer:** add FanoutBuffer with per-listener cursors ([3b8f952](https://github.com/RouHim/funkstrom/commit/3b8f95238c02507b1d5c18fa878f60881c555949))
+* **main:** wire timeline-driven architecture ([8cb3295](https://github.com/RouHim/funkstrom/commit/8cb32956662b2fb655a9641c3ae030ea4f667558))
+* **scanner:** extract track duration via ffprobe ([cbf18bb](https://github.com/RouHim/funkstrom/commit/cbf18bba74e538d33eeaace1faedf7e947d8e0f8))
+* **server:** add per-stream listener counting with RAII guard ([14d3ec0](https://github.com/RouHim/funkstrom/commit/14d3ec0897e3f162863667a9a4fed019a624d0db))
+* **timeline:** add PlaybackDirector with virtual clock ([546a155](https://github.com/RouHim/funkstrom/commit/546a1551c6867b48000a0ef860495a82bc2b42a6))
+
 ## [1.0.6](https://github.com/RouHim/funkstrom/compare/1.0.5...1.0.6) (2026-03-08)
 
 
