@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/RouHim/funkstrom/compare/1.1.0...1.1.1) (2026-06-04)
+
+
+### Bug Fixes
+
+* **build:** add retry and content validation to container ffmpeg download ([5613eb6](https://github.com/RouHim/funkstrom/commit/5613eb656c101650f7beb6d845d95d6d38c3ef7c))
+
 # [1.1.0](https://github.com/RouHim/funkstrom/compare/1.0.6...1.1.0) (2026-06-04)
 
 
