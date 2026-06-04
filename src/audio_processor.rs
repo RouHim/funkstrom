@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{watch, Notify};
 
+use crate::audio_metadata::TrackMetadata;
 use crate::playback_director::TimelineSnapshot;
 
 // Constants for audio processing configuration
@@ -165,6 +166,7 @@ impl FFmpegProcessor {
     pub fn start_conversion_process(
         &self,
         input_path: &Path,
+        metadata: Option<&TrackMetadata>,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         let input_str = input_path.to_str().ok_or_else(|| {
             format!(
@@ -172,15 +174,16 @@ impl FFmpegProcessor {
                 input_path.display()
             )
         })?;
-        self.start_conversion(input_str)
+        self.start_conversion(input_str, metadata)
     }
 
     #[allow(dead_code)]
     pub fn start_conversion_from_url(
         &self,
         url: &str,
+        metadata: Option<&TrackMetadata>,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion(url)
+        self.start_conversion(url, metadata)
     }
 
     #[allow(dead_code)]
@@ -188,19 +191,26 @@ impl FFmpegProcessor {
         &self,
         input: &str,
         seek_offset_secs: Option<f64>,
+        metadata: Option<&TrackMetadata>,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion_internal(input, seek_offset_secs)
+        self.start_conversion_internal(input, seek_offset_secs, metadata)
     }
 
     #[allow(dead_code)]
     fn start_conversion(
         &self,
         input: &str,
+        metadata: Option<&TrackMetadata>,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion_internal(input, None)
+        self.start_conversion_internal(input, None, metadata)
     }
 
-    fn build_ffmpeg_args(&self, input: &str, seek_offset_secs: Option<f64>) -> Vec<String> {
+    fn build_ffmpeg_args(
+        &self,
+        input: &str,
+        seek_offset_secs: Option<f64>,
+        metadata: Option<&TrackMetadata>,
+    ) -> Vec<String> {
         let codec = self.get_codec_for_format(&self.format);
         let muxer = self.get_muxer_for_format(&self.format);
 
@@ -213,10 +223,21 @@ impl FFmpegProcessor {
             }
         }
 
+        args.extend(["-re".to_string(), "-i".to_string(), input.to_string()]);
+
+        // Pass metadata as codec tags for OGG/FLAC container formats
+        // so Vorbis/Opus/FLAC comment headers carry track info
+        if let Some(meta) = metadata {
+            let fmt = self.format.to_lowercase();
+            if fmt == "ogg" || fmt == "opus" || fmt == "vorbis" || fmt == "flac" {
+                args.push("-metadata".to_string());
+                args.push(format!("title={}", meta.title));
+                args.push("-metadata".to_string());
+                args.push(format!("artist={}", meta.artist));
+            }
+        }
+
         args.extend([
-            "-re".to_string(),
-            "-i".to_string(),
-            input.to_string(),
             "-vn".to_string(),
             "-f".to_string(),
             muxer.to_string(),
@@ -240,6 +261,7 @@ impl FFmpegProcessor {
         &self,
         input: &str,
         seek_offset_secs: Option<f64>,
+        metadata: Option<&TrackMetadata>,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         debug!("Starting FFmpeg conversion for: {}", input);
 
@@ -251,7 +273,7 @@ impl FFmpegProcessor {
             }
         }
 
-        let ffmpeg_args = self.build_ffmpeg_args(input, seek_offset_secs);
+        let ffmpeg_args = self.build_ffmpeg_args(input, seek_offset_secs, metadata);
 
         let mut cmd = Command::new(&self.ffmpeg_path);
         cmd.args(&ffmpeg_args)
@@ -329,9 +351,9 @@ impl FFmpegProcessor {
                                 || track_str.starts_with("https://")
                             {
                                 info!("Starting stream from URL: {}", track_str);
-                                self.start_conversion_from_url(track_str)
+                                self.start_conversion_from_url(track_str, None)
                             } else {
-                                self.start_conversion_process(&track)
+                                self.start_conversion_process(&track, None)
                             };
 
                             match result {
@@ -463,6 +485,7 @@ impl FFmpegProcessor {
                     let result = self.start_conversion_with_seek(
                         &track_str,
                         Some(current_snapshot.elapsed_in_track_secs),
+                        Some(&current_snapshot.current_metadata),
                     );
 
                     match result {
@@ -824,7 +847,7 @@ mod tests {
     #[test]
     fn given_local_input_with_seek_when_building_ffmpeg_args_then_places_ss_before_re_and_i() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        let args = processor.build_ffmpeg_args("/tmp/song.mp3", Some(12.5));
+        let args = processor.build_ffmpeg_args("/tmp/song.mp3", Some(12.5), None);
 
         let ss_index = args
             .iter()
@@ -847,7 +870,7 @@ mod tests {
     #[test]
     fn given_url_input_with_seek_when_building_ffmpeg_args_then_omits_ss_and_keeps_re_before_i() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        let args = processor.build_ffmpeg_args("https://example.com/stream.mp3", Some(42.0));
+        let args = processor.build_ffmpeg_args("https://example.com/stream.mp3", Some(42.0), None);
 
         assert!(!args.iter().any(|arg| arg == "-ss"));
 
@@ -865,15 +888,15 @@ mod tests {
     #[test]
     fn given_local_input_without_seek_when_building_ffmpeg_args_then_omits_ss() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        let args = processor.build_ffmpeg_args("/tmp/song.mp3", None);
+        let args = processor.build_ffmpeg_args("/tmp/song.mp3", None, None);
         assert!(!args.iter().any(|arg| arg == "-ss"));
     }
 
     #[test]
     fn given_zero_or_negative_seek_when_building_ffmpeg_args_then_omits_ss() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        let args_zero = processor.build_ffmpeg_args("/tmp/song.mp3", Some(0.0));
-        let args_negative = processor.build_ffmpeg_args("/tmp/song.mp3", Some(-1.0));
+        let args_zero = processor.build_ffmpeg_args("/tmp/song.mp3", Some(0.0), None);
+        let args_negative = processor.build_ffmpeg_args("/tmp/song.mp3", Some(-1.0), None);
 
         assert!(!args_zero.iter().any(|arg| arg == "-ss"));
         assert!(!args_negative.iter().any(|arg| arg == "-ss"));
@@ -882,7 +905,7 @@ mod tests {
     #[test]
     fn given_audio_conversion_when_building_ffmpeg_args_then_disables_video_streams() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        let args = processor.build_ffmpeg_args("/tmp/song.flac", None);
+        let args = processor.build_ffmpeg_args("/tmp/song.flac", None, None);
         assert!(args.iter().any(|arg| arg == "-vn"));
     }
 
@@ -991,6 +1014,82 @@ exit 1
         assert!(
             !is_paused.load(Ordering::SeqCst),
             "expected audio processor to never enter paused state based on is_encoding_active"
+        );
+    }
+
+    // --- FFmpeg metadata passthrough tests ---
+
+    fn test_metadata() -> TrackMetadata {
+        TrackMetadata {
+            title: "Test Song".to_string(),
+            artist: "Test Artist".to_string(),
+            album: "Test Album".to_string(),
+            file_path: "/tmp/test.mp3".to_string(),
+        }
+    }
+
+    #[test]
+    fn given_ogg_format_with_metadata_when_building_args_then_includes_metadata_tags() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
+        let metadata = test_metadata();
+        let args = processor.build_ffmpeg_args("/tmp/song.flac", None, Some(&metadata));
+
+        // Should contain -metadata title=... and -metadata artist=...
+        let meta_indices: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, arg)| *arg == "-metadata")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(meta_indices.len(), 2, "expected two -metadata args for OGG");
+        assert_eq!(args[meta_indices[0] + 1], "title=Test Song");
+        assert_eq!(args[meta_indices[1] + 1], "artist=Test Artist");
+        // Metadata should appear before the codec/muxer args
+        assert!(meta_indices[0] < args.iter().position(|a| a == "-acodec").unwrap());
+    }
+
+    #[test]
+    fn given_flac_format_with_metadata_when_building_args_then_includes_metadata_tags() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
+        let metadata = test_metadata();
+        let args = processor.build_ffmpeg_args("/tmp/song.flac", None, Some(&metadata));
+
+        let meta_count = args.iter().filter(|a| *a == "-metadata").count();
+        assert_eq!(meta_count, 2, "expected two -metadata args for FLAC");
+    }
+
+    #[test]
+    fn given_mp3_format_with_metadata_when_building_args_then_excludes_metadata_tags() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
+        let metadata = test_metadata();
+        let args = processor.build_ffmpeg_args("/tmp/song.mp3", None, Some(&metadata));
+
+        assert!(
+            !args.iter().any(|a| a == "-metadata"),
+            "MP3 format should not include -metadata args"
+        );
+    }
+
+    #[test]
+    fn given_aac_format_with_metadata_when_building_args_then_excludes_metadata_tags() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
+        let metadata = test_metadata();
+        let args = processor.build_ffmpeg_args("/tmp/song.aac", None, Some(&metadata));
+
+        assert!(
+            !args.iter().any(|a| a == "-metadata"),
+            "AAC format should not include -metadata args"
+        );
+    }
+
+    #[test]
+    fn given_ogg_format_without_metadata_when_building_args_then_excludes_metadata_tags() {
+        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
+        let args = processor.build_ffmpeg_args("/tmp/song.flac", None, None);
+
+        assert!(
+            !args.iter().any(|a| a == "-metadata"),
+            "No -metadata args when metadata is None"
         );
     }
 }

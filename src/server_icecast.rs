@@ -1,6 +1,7 @@
 use crate::fanout_buffer::SharedFanoutBuffer;
 use crate::playback_director::TimelineSnapshot;
 use crate::server_swagger;
+use bytes::Bytes;
 use minijinja::Environment;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -86,6 +87,7 @@ struct StreamContext {
     station_genre: String,
     listeners: Arc<AtomicUsize>,
     notify: Arc<tokio::sync::Notify>,
+    timeline_rx: watch::Receiver<TimelineSnapshot>,
 }
 
 #[derive(Clone)]
@@ -120,6 +122,22 @@ pub type StreamBufferEntry = (
     Arc<tokio::sync::Notify>,
     Arc<AtomicBool>,
 );
+
+/// Build an ICY metadata block per the Icecast/SHOUTcast protocol.
+///
+/// Format: 1 byte block count N, followed by N×16 bytes of null-padded UTF-8.
+/// N = ceil(strlen / 16), clamped to 255 max.
+fn build_icy_metadata_block(artist_title: &str) -> Vec<u8> {
+    let stream_title = format!("StreamTitle='{}';StreamUrl='';", artist_title);
+    let len = stream_title.len();
+    let blocks = len.div_ceil(16).min(255) as u8;
+    let padded_len = blocks as usize * 16;
+    let copy_len = len.min(padded_len);
+    let mut block = vec![0u8; 1 + padded_len];
+    block[0] = blocks;
+    block[1..1 + copy_len].copy_from_slice(&stream_title.as_bytes()[..copy_len]);
+    block
+}
 
 impl IcecastServer {
     pub fn new(
@@ -172,6 +190,7 @@ impl IcecastServer {
         let station_name = self.station_name.clone();
         let station_description = self.station_description.clone();
         let station_genre = self.station_genre.clone();
+        let timeline_rx = self.timeline_rx.clone();
 
         let stream_route = warp::path::param::<String>()
             .and(warp::get())
@@ -181,6 +200,7 @@ impl IcecastServer {
                 let station_name = station_name.clone();
                 let station_description = station_description.clone();
                 let station_genre = station_genre.clone();
+                let timeline_rx = timeline_rx.clone();
 
                 async move {
                     // Find the stream by name and create context
@@ -195,6 +215,7 @@ impl IcecastServer {
                                 station_genre: station_genre.clone(),
                                 listeners: stream.listeners.clone(),
                                 notify: stream.notify.clone(),
+                                timeline_rx: timeline_rx.clone(),
                             };
                             return Self::handle_stream_request(headers, context).await;
                         }
@@ -264,10 +285,31 @@ impl IcecastServer {
             log::warn!("Client attempted to seek on live stream, ignoring Range header");
         }
 
+        // Detect ICY metadata support
+        let icy_metadata_requested = headers
+            .get("Icy-MetaData")
+            .or_else(|| headers.get("icy-metadata"))
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false);
+
+        let format_lower = context.format.to_lowercase();
+        let icy_metadata_supported = matches!(format_lower.as_str(), "mp3" | "aac");
+        let do_icy_metadata = icy_metadata_requested && icy_metadata_supported;
+
+        if icy_metadata_requested && !icy_metadata_supported {
+            log::debug!(
+                "Client requested ICY metadata but format '{}' does not support it",
+                context.format
+            );
+        }
+
         let (tx, rx) = mpsc::unbounded_channel();
         let buffer = context.buffer.clone();
         let listeners = context.listeners.clone();
         let notify = context.notify.clone();
+        let timeline_rx = context.timeline_rx.clone();
+        let do_icy_metadata_clone = do_icy_metadata;
 
         tokio::spawn(async move {
             let _guard = ListenerGuard::new(listeners, notify);
@@ -281,6 +323,21 @@ impl IcecastServer {
             let mut last_data_time = Instant::now();
             let timeout_duration = Duration::from_secs(30);
 
+            const METADATA_INTERVAL: usize = 16000;
+            let mut bytes_since_meta: usize = 0;
+            let mut last_meta_str = String::new();
+
+            // Send initial metadata block before any audio data
+            if do_icy_metadata_clone {
+                let initial_snapshot = timeline_rx.borrow();
+                let initial_meta = initial_snapshot.current_metadata.to_icy_metadata();
+                last_meta_str = initial_meta.clone();
+                let initial_block = build_icy_metadata_block(&initial_meta);
+                if tx.send(Ok(Bytes::from(initial_block))).is_err() {
+                    return;
+                }
+            }
+
             loop {
                 let chunk = match buffer.read() {
                     Ok(guard) => guard.read_from_cursor(&mut cursor),
@@ -291,9 +348,44 @@ impl IcecastServer {
                 };
 
                 if let Some(chunk) = chunk {
-                    if tx.send(Ok::<_, warp::Error>(chunk)).is_err() {
-                        log::info!("Client disconnected");
-                        break;
+                    if do_icy_metadata_clone {
+                        let mut offset = 0;
+                        while offset < chunk.len() {
+                            let remaining_in_interval = METADATA_INTERVAL - bytes_since_meta;
+                            let consume = remaining_in_interval.min(chunk.len() - offset);
+
+                            if consume > 0 {
+                                let audio_slice = chunk.slice(offset..offset + consume);
+                                if tx.send(Ok(audio_slice)).is_err() {
+                                    log::info!("Client disconnected");
+                                    return;
+                                }
+                                offset += consume;
+                                bytes_since_meta += consume;
+                            }
+
+                            if bytes_since_meta >= METADATA_INTERVAL {
+                                // Inject metadata block
+                                let snapshot = timeline_rx.borrow();
+                                let current_meta = snapshot.current_metadata.to_icy_metadata();
+                                let block = if current_meta != last_meta_str {
+                                    last_meta_str = current_meta;
+                                    build_icy_metadata_block(&last_meta_str)
+                                } else {
+                                    vec![0x00]
+                                };
+                                if tx.send(Ok(Bytes::from(block))).is_err() {
+                                    log::info!("Client disconnected");
+                                    return;
+                                }
+                                bytes_since_meta = 0;
+                            }
+                        }
+                    } else {
+                        if tx.send(Ok::<_, warp::Error>(chunk)).is_err() {
+                            log::info!("Client disconnected");
+                            break;
+                        }
                     }
                     last_data_time = Instant::now();
                 } else {
@@ -310,10 +402,10 @@ impl IcecastServer {
 
         let server_version = format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 
-        let response = warp::http::Response::builder()
+        let mut response_builder = warp::http::Response::builder()
             .header(
                 "Content-Type",
-                match context.format.to_lowercase().as_str() {
+                match format_lower.as_str() {
                     "aac" => "audio/aac",
                     "ogg" => "audio/ogg",
                     "opus" => "audio/ogg",
@@ -331,7 +423,13 @@ impl IcecastServer {
             .header("icy-description", &context.station_description)
             .header("icy-genre", &context.station_genre)
             .header("icy-br", context.bitrate.to_string())
-            .header("Server", &server_version)
+            .header("Server", &server_version);
+
+        if do_icy_metadata {
+            response_builder = response_builder.header("icy-metaint", "16000");
+        }
+
+        let response = response_builder
             .body(hyper::Body::wrap_stream(stream))
             .map_err(|e| {
                 log::error!("Failed to build HTTP response: {}", e);
@@ -538,5 +636,52 @@ mod tests {
 
         let json = serde_json::to_string(&status).expect("serialization failed");
         assert!(json.contains("\"listeners\":5"));
+    }
+
+    // --- build_icy_metadata_block tests ---
+
+    #[test]
+    fn given_short_title_when_building_metadata_block_then_pads_to_16_bytes() {
+        // "Artist - Title" = 15 chars
+        // "StreamTitle='Artist - Title';StreamUrl='';" = 13 + 15 + 18 = 46 chars
+        // N = ceil(46 / 16) = 3, padded = 48 bytes
+        let block = build_icy_metadata_block("Artist - Title");
+        assert_eq!(block.len(), 1 + 3 * 16); // 49 bytes
+        assert_eq!(block[0], 3); // 3 blocks
+        let expected_prefix = b"StreamTitle='Artist - Title';StreamUrl='';";
+        assert_eq!(&block[1..1 + expected_prefix.len()], expected_prefix);
+        // Remaining bytes should be null padding
+        assert!(block[1 + expected_prefix.len()..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn given_exact_16_boundary_when_building_metadata_block_then_correct_block_count() {
+        // 31-byte payload → ceil(31/16) = 2 blocks
+        let block = build_icy_metadata_block("AB");
+        assert_eq!(block[0], 2);
+        assert_eq!(block.len(), 1 + 2 * 16);
+    }
+
+    #[test]
+    fn given_empty_title_when_building_metadata_block_then_still_valid() {
+        let block = build_icy_metadata_block("");
+        assert_eq!(block[0], 2); // "StreamTitle='';StreamUrl='';" = 30 chars → ceil(30/16)=2
+        assert!(block[1..].iter().any(|&b| b != 0)); // has content
+    }
+
+    #[test]
+    fn given_very_long_title_when_building_metadata_block_then_clamped_to_255_blocks() {
+        let long = "X".repeat(5000);
+        let block = build_icy_metadata_block(&long);
+        assert_eq!(block[0], 255); // clamped
+        assert_eq!(block.len(), 1 + 255 * 16); // 4081 bytes
+    }
+
+    #[test]
+    fn given_special_characters_when_building_metadata_block_then_utf8_preserved() {
+        let block = build_icy_metadata_block("Motörhead - Åce of Spädes");
+        let content = String::from_utf8_lossy(&block[1..]);
+        assert!(content.contains("Motörhead"));
+        assert!(content.contains("Åce of Spädes"));
     }
 }
