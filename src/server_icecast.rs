@@ -7,7 +7,7 @@ use futures_core::Stream;
 use serde::Serialize;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -35,7 +35,6 @@ struct StreamStatus {
 }
 
 // Template context structures
-#[derive(Serialize)]
 struct InfoPageContext {
     station_name: String,
     current_track: String,
@@ -43,10 +42,10 @@ struct InfoPageContext {
     station_description: String,
     station_genre: String,
     bitrate: u32,
-    bind_address: String,
-    port: u16,
+    public_url: String,
     streams: Vec<StreamLink>,
     first_stream: String,
+    cover_url: String,
 }
 
 #[derive(Serialize)]
@@ -91,6 +90,7 @@ struct StreamContext {
     listeners: Arc<AtomicUsize>,
     notify: Arc<tokio::sync::Notify>,
     timeline_rx: watch::Receiver<TimelineSnapshot>,
+    cover_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -100,8 +100,8 @@ pub struct IcecastServer {
     station_description: String,
     station_genre: String,
     timeline_rx: watch::Receiver<TimelineSnapshot>,
-    bind_address: Arc<Mutex<String>>,
-    port: Arc<Mutex<u16>>,
+    public_url: Option<String>,
+    port: u16,
     start_time: Instant,
 }
 
@@ -126,12 +126,18 @@ pub type StreamBufferEntry = (
     Arc<AtomicBool>,
 );
 
-/// Build an ICY metadata block per the Icecast/SHOUTcast protocol.
-///
-/// Format: 1 byte block count N, followed by N×16 bytes of null-padded UTF-8.
-/// N = ceil(strlen / 16), clamped to 255 max.
-fn build_icy_metadata_block(artist_title: &str) -> Vec<u8> {
-    let stream_title = format!("StreamTitle='{}';StreamUrl='';", artist_title);
+/// Extract cover art from an audio file's embedded tags.
+/// Returns (image_bytes, mime_type) if the file has embedded cover art.
+fn extract_cover_from_file(path: &std::path::Path) -> Option<(Vec<u8>, String)> {
+    let tag = audiotags::Tag::new().read_from_path(path).ok()?;
+    let album = tag.album()?;
+    let cover = album.cover?;
+    let mime: &'static str = cover.mime_type.into();
+    Some((cover.data.to_vec(), mime.to_string()))
+}
+fn build_icy_metadata_block(artist_title: &str, stream_url: Option<&str>) -> Vec<u8> {
+    let stream_url = stream_url.unwrap_or("");
+    let stream_title = format!("StreamTitle='{}';StreamUrl='{}';", artist_title, stream_url);
     let len = stream_title.len();
     let blocks = len.div_ceil(16).min(255) as u8;
     let padded_len = blocks as usize * 16;
@@ -153,6 +159,7 @@ fn process_audio_with_icy(
     bytes_since_meta: &mut usize,
     last_meta_str: &mut String,
     current_meta_str: &str,
+    stream_url: Option<&str>,
 ) -> Vec<Bytes> {
     let mut output = Vec::new();
     let mut offset = 0;
@@ -169,7 +176,7 @@ fn process_audio_with_icy(
         if *bytes_since_meta >= metaint {
             let block: Vec<u8> = if *current_meta_str != *last_meta_str {
                 *last_meta_str = current_meta_str.to_string();
-                build_icy_metadata_block(last_meta_str)
+                build_icy_metadata_block(last_meta_str, stream_url)
             } else {
                 vec![0x00]
             };
@@ -232,8 +239,8 @@ fn render_info_page(ctx: &InfoPageContext, template: &str) -> String {
         .replace("{{ current_track }}", &ctx.current_track)
         .replace("{{ album }}", &ctx.album)
         .replace("{{ bitrate }}", &ctx.bitrate.to_string())
-        .replace("{{ bind_address }}", &ctx.bind_address)
-        .replace("{{ port }}", &ctx.port.to_string())
+        .replace("{{ public_url }}", &ctx.public_url)
+        .replace("{{ cover_url }}", &ctx.cover_url)
 }
 
 impl IcecastServer {
@@ -243,6 +250,7 @@ impl IcecastServer {
         station_description: String,
         station_genre: String,
         timeline_rx: watch::Receiver<TimelineSnapshot>,
+        public_url: Option<String>,
     ) -> Self {
         let streams = stream_buffers
             .into_iter()
@@ -265,22 +273,27 @@ impl IcecastServer {
             station_description,
             station_genre,
             timeline_rx,
-            bind_address: Arc::new(Mutex::new(String::new())),
-            port: Arc::new(Mutex::new(0)),
+            public_url,
+            port: 0,
             start_time: Instant::now(),
         }
     }
 
     pub async fn start_server(
         &self,
-        bind_address: &str,
+        public_url: Option<String>,
         port: u16,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Store bind_address and port for use in info page
-        *self.bind_address.lock().unwrap_or_else(|e| e.into_inner()) = bind_address.to_string();
-        *self.port.lock().unwrap_or_else(|e| e.into_inner()) = port;
+        if public_url.is_none() {
+            log::warn!(
+                "No public_url configured - album art and stream URLs will not be accessible from external clients"
+            );
+        }
 
         let server = Arc::new(self.clone());
+
+        // Build cover URL from public_url or set to None if not configured
+        let cover_url: Option<String> = public_url.as_ref().map(|url| format!("{}/cover.jpg", url));
 
         // Dynamic stream route handler
         let streams_map = self.streams.clone();
@@ -298,6 +311,7 @@ impl IcecastServer {
                 let station_description = station_description.clone();
                 let station_genre = station_genre.clone();
                 let timeline_rx = timeline_rx.clone();
+                let cover_url = cover_url.clone();
 
                 async move {
                     // Find the stream by name and create context
@@ -313,6 +327,7 @@ impl IcecastServer {
                                 listeners: stream.listeners.clone(),
                                 notify: stream.notify.clone(),
                                 timeline_rx: timeline_rx.clone(),
+                                cover_url: cover_url.clone(),
                             };
                             return Self::handle_stream_request(headers, context).await;
                         }
@@ -345,6 +360,14 @@ impl IcecastServer {
             }
         });
 
+        let cover_route = warp::path("cover.jpg").and(warp::get()).and_then({
+            let server = Arc::clone(&server);
+            move || {
+                let server = Arc::clone(&server);
+                async move { server.handle_cover_request().await }
+            }
+        });
+
         // Swagger API documentation routes
         let swagger_ui_route = server_swagger::swagger_ui();
         let openapi_spec_route = server_swagger::openapi_spec();
@@ -352,14 +375,19 @@ impl IcecastServer {
         let routes = stream_route
             .or(status_route)
             .or(current_route)
+            .or(cover_route)
             .or(swagger_ui_route)
             .or(openapi_spec_route)
             .or(info_route);
+        let bind_addr = "0.0.0.0";
+        if let Some(ref url) = public_url {
+            log::info!("Starting Funkstrom server on {}", url);
+            log::info!("API Docs: {}/api-docs", url);
+        } else {
+            log::info!("Starting Funkstrom server on {}:{}", bind_addr, port);
+        }
 
-        log::info!("Starting Funkstrom server on {}:{}", bind_address, port);
-        log::info!("API Docs: http://{}:{}/api-docs", bind_address, port);
-
-        let addr: std::net::SocketAddr = format!("{}:{}", bind_address, port).parse()?;
+        let addr: std::net::SocketAddr = format!("{}:{}", bind_addr, port).parse()?;
         warp::serve(routes).run(addr).await;
         Ok(())
     }
@@ -406,6 +434,7 @@ impl IcecastServer {
         let listeners = context.listeners.clone();
         let notify = context.notify.clone();
         let timeline_rx = context.timeline_rx.clone();
+        let cover_url = context.cover_url.clone();
         let do_icy_metadata_clone = do_icy_metadata;
 
         tokio::spawn(async move {
@@ -445,6 +474,7 @@ impl IcecastServer {
                             &mut bytes_since_meta,
                             &mut last_meta_str,
                             &current_meta,
+                            cover_url.as_deref(),
                         ) {
                             if tx.send(Ok(block)).is_err() {
                                 log::info!("Client disconnected");
@@ -580,17 +610,43 @@ impl IcecastServer {
         ))
     }
 
+    async fn handle_cover_request(&self) -> Result<impl Reply, warp::Rejection> {
+        let snapshot = self.timeline_rx.borrow().clone();
+        let path = &snapshot.track_path;
+
+        // Guard against empty path (no track playing)
+        if path.as_os_str().is_empty() {
+            return warp::http::Response::builder()
+                .status(warp::http::StatusCode::NO_CONTENT)
+                .body(vec![])
+                .map_err(|_| warp::reject::reject());
+        }
+
+        match extract_cover_from_file(path) {
+            Some((data, mime)) => {
+                let response = warp::http::Response::builder()
+                    .header("Content-Type", mime)
+                    .header("Cache-Control", "public, max-age=60")
+                    .body(data)
+                    .map_err(|_| warp::reject::reject())?;
+                Ok(response)
+            }
+            None => Ok(warp::http::Response::builder()
+                .status(warp::http::StatusCode::NO_CONTENT)
+                .body(vec![])
+                .map_err(|_| warp::reject::reject())?),
+        }
+    }
+
     async fn handle_info_request(&self) -> Result<impl Reply, warp::Rejection> {
         let snapshot = self.timeline_rx.borrow().clone();
         let current_track = snapshot.current_metadata.to_icy_metadata();
         let album = &snapshot.current_metadata.album;
 
-        let bind_address = self
-            .bind_address
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let port = *self.port.lock().unwrap_or_else(|e| e.into_inner());
+        let base_url = self
+            .public_url
+            .clone()
+            .unwrap_or_else(|| format!("http://0.0.0.0:{}", self.port));
 
         // Build streams list for template context
         let streams: Vec<StreamLink> = self
@@ -599,7 +655,7 @@ impl IcecastServer {
             .map(|stream| StreamLink {
                 name: stream.name.clone(),
                 bitrate: stream.bitrate,
-                url: format!("http://{}:{}/{}", bind_address, port, stream.name),
+                url: format!("{}/{}", base_url, stream.name),
             })
             .collect();
 
@@ -618,10 +674,10 @@ impl IcecastServer {
             station_description: self.station_description.clone(),
             station_genre: self.station_genre.clone(),
             bitrate: first_bitrate,
-            bind_address: bind_address.clone(),
-            port,
+            public_url: base_url.clone(),
             streams,
             first_stream,
+            cover_url: format!("{}/cover.jpg", base_url),
         };
 
         const TEMPLATE_STR: &str = include_str!("../templates/info.html");
@@ -700,7 +756,7 @@ mod tests {
         // "Artist - Title" = 15 chars
         // "StreamTitle='Artist - Title';StreamUrl='';" = 13 + 15 + 18 = 46 chars
         // N = ceil(46 / 16) = 3, padded = 48 bytes
-        let block = build_icy_metadata_block("Artist - Title");
+        let block = build_icy_metadata_block("Artist - Title", None);
         assert_eq!(block.len(), 1 + 3 * 16); // 49 bytes
         assert_eq!(block[0], 3); // 3 blocks
         let expected_prefix = b"StreamTitle='Artist - Title';StreamUrl='';";
@@ -712,14 +768,14 @@ mod tests {
     #[test]
     fn given_exact_16_boundary_when_building_metadata_block_then_correct_block_count() {
         // 31-byte payload → ceil(31/16) = 2 blocks
-        let block = build_icy_metadata_block("AB");
+        let block = build_icy_metadata_block("AB", None);
         assert_eq!(block[0], 2);
         assert_eq!(block.len(), 1 + 2 * 16);
     }
 
     #[test]
     fn given_empty_title_when_building_metadata_block_then_still_valid() {
-        let block = build_icy_metadata_block("");
+        let block = build_icy_metadata_block("", None);
         assert_eq!(block[0], 2); // "StreamTitle='';StreamUrl='';" = 30 chars → ceil(30/16)=2
         assert!(block[1..].iter().any(|&b| b != 0)); // has content
     }
@@ -727,17 +783,26 @@ mod tests {
     #[test]
     fn given_very_long_title_when_building_metadata_block_then_clamped_to_255_blocks() {
         let long = "X".repeat(5000);
-        let block = build_icy_metadata_block(&long);
+        let block = build_icy_metadata_block(&long, None);
         assert_eq!(block[0], 255); // clamped
         assert_eq!(block.len(), 1 + 255 * 16); // 4081 bytes
     }
 
     #[test]
     fn given_special_characters_when_building_metadata_block_then_utf8_preserved() {
-        let block = build_icy_metadata_block("Motörhead - Åce of Spädes");
+        let block = build_icy_metadata_block("Motörhead - Åce of Spädes", None);
         let content = String::from_utf8_lossy(&block[1..]);
         assert!(content.contains("Motörhead"));
         assert!(content.contains("Åce of Spädes"));
+    }
+
+    #[test]
+    fn given_stream_url_when_building_metadata_block_then_url_included() {
+        let block =
+            build_icy_metadata_block("Artist - Title", Some("http://example.com/cover.jpg"));
+        let content = String::from_utf8_lossy(&block[1..]);
+        assert!(content.contains("StreamTitle='Artist - Title';"));
+        assert!(content.contains("StreamUrl='http://example.com/cover.jpg';"));
     }
 }
 
@@ -756,6 +821,7 @@ fn given_bytes_since_meta_zero_when_short_chunk_then_all_output_is_audio() {
         &mut bytes_since_meta,
         &mut last_meta_str,
         "Some Artist - Some Track",
+        None,
     );
 
     // All blocks are audio — no metadata injected
@@ -787,6 +853,7 @@ fn given_bytes_near_metaint_when_chunk_crosses_boundary_then_metadata_injected()
         &mut bytes_since_meta,
         &mut last_meta_str,
         "Artist - Title",
+        None,
     );
 
     assert_eq!(blocks.len(), 3, "audio, metadata, audio");
@@ -817,6 +884,7 @@ fn given_metadata_unchanged_when_boundary_hit_then_empty_block() {
         &mut bytes_since_meta,
         &mut last_meta_str,
         "Artist - Title", // same as last_meta_str
+        None,
     );
 
     assert_eq!(blocks.len(), 3);
@@ -839,6 +907,7 @@ fn given_metadata_changed_when_boundary_hit_then_full_block_and_counter_update()
         &mut bytes_since_meta,
         &mut last_meta_str,
         "New Artist - New Title",
+        None,
     );
 
     assert_eq!(blocks.len(), 3);
@@ -862,6 +931,7 @@ fn given_chunk_spanning_multiple_boundaries_then_metadata_at_each() {
         &mut bytes_since_meta,
         &mut last_meta_str,
         "Track A - Song A", // unchanged
+        None,
     );
 
     // Layout: A=[16000] M=[empty] A=[16000] M=[empty] A=[16000] M=[empty] A=[2000]
@@ -893,6 +963,7 @@ fn given_chunk_exactly_at_metaint_boundary_then_only_metadata_emitted() {
         &mut bytes_since_meta,
         &mut last_meta_str,
         "Artist - Track",
+        None,
     );
 
     // First: metadata (boundary already reached), then 100 bytes audio
@@ -914,9 +985,118 @@ fn given_empty_chunk_when_processing_then_no_output() {
         &mut bytes_since_meta,
         &mut last_meta_str,
         "Artist - Track",
+        None,
     );
 
     assert!(blocks.is_empty());
     assert_eq!(bytes_since_meta, 0);
     assert_eq!(last_meta_str, "");
+}
+
+// --- extract_cover_from_file tests ---
+
+#[test]
+fn given_file_without_cover_when_extracting_cover_then_returns_none() {
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    // Write minimal valid MP3 without ID3 tags (or with empty tags)
+    // audiotags will fail to find tags, so album() returns None
+    tmp.write_all(b"\xFF\xFB\x90\x00").unwrap();
+    let result = extract_cover_from_file(tmp.path());
+    assert!(result.is_none());
+}
+
+#[test]
+fn given_file_with_cover_when_extracting_cover_then_returns_image() {
+    // Minimal 1x1 white JPEG
+    let jpeg_data: &[u8] = &[
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00,
+        0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06,
+        0x05, 0x08, 0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B,
+        0x0C, 0x19, 0x12, 0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
+        0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29, 0x2C, 0x30, 0x31,
+        0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32, 0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF,
+        0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00,
+        0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B,
+        0xFF, 0xC4, 0x00, 0xB5, 0x10, 0x00, 0x02, 0x01, 0x03, 0x03, 0x02, 0x04, 0x03, 0x05, 0x05,
+        0x04, 0x04, 0x00, 0x00, 0x01, 0x7D, 0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21,
+        0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xA1, 0x08,
+        0x23, 0x42, 0xB1, 0xC1, 0x15, 0x52, 0xD1, 0xF0, 0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0A,
+        0x16, 0x17, 0x18, 0x19, 0x1A, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x34, 0x35, 0x36, 0x37,
+        0x38, 0x39, 0x3A, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x53, 0x54, 0x55, 0x56,
+        0x57, 0x58, 0x59, 0x5A, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x73, 0x74, 0x75,
+        0x76, 0x77, 0x78, 0x79, 0x7A, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x92, 0x93,
+        0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9,
+        0xAA, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6,
+        0xC7, 0xC8, 0xC9, 0xCA, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xE1, 0xE2,
+        0xE3, 0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7,
+        0xF8, 0xF9, 0xFA, 0xFF, 0xDA, 0x00, 0x0C, 0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00,
+        0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+        0xD9,
+    ];
+
+    // Build a valid MP3 file with an ID3v2 tag containing cover art,
+    // using the `id3` crate (already a transitive dependency via audiotags).
+    use id3::frame::{Content, Picture, PictureType};
+    use id3::{Frame, TagLike};
+
+    let mut tag = id3::Tag::new();
+    let picture = Picture {
+        mime_type: "image/jpeg".to_string(),
+        picture_type: PictureType::CoverFront,
+        description: "cover".to_string(),
+        data: jpeg_data.to_vec(),
+    };
+    tag.add_frame(Frame::with_content("APIC", Content::Picture(picture)));
+    // audiotags requires a TALB frame for album() to return Some
+    tag.set_album("Test Album");
+
+    let mut mp3_bytes = Vec::new();
+    tag.write_to(&mut mp3_bytes, id3::Version::Id3v23)
+        .expect("failed to write ID3 tag");
+    mp3_bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+    mp3_bytes.resize(mp3_bytes.len() + 100, 0x00);
+    // audiotags detects format by file extension, so use .mp3
+    let tmpdir = tempfile::tempdir().unwrap();
+    let audio_path = tmpdir.path().join("test.mp3");
+    std::fs::write(&audio_path, &mp3_bytes).unwrap();
+
+    let result = extract_cover_from_file(&audio_path);
+    assert!(result.is_some(), "expected cover art to be extracted");
+    let (_data, mime_type) = result.unwrap();
+    assert_eq!(mime_type, "image/jpeg");
+}
+
+// --- process_audio_with_icy StreamUrl test ---
+
+#[test]
+fn given_stream_url_when_processing_audio_then_metadata_block_contains_stream_url() {
+    let chunk = Bytes::from(vec![0u8; 32000]); // spans two 16000 boundaries
+    let mut bytes_since_meta: usize = 0;
+    let mut last_meta_str = String::new();
+    let stream_url = Some("http://example.com/cover.jpg");
+
+    let blocks = process_audio_with_icy(
+        chunk,
+        16000,
+        &mut bytes_since_meta,
+        &mut last_meta_str,
+        "Artist - Title",
+        stream_url,
+    );
+
+    // We should have at least one metadata block
+    assert!(!blocks.is_empty());
+    // Find the metadata block (the one starting with a non-zero count byte)
+    let meta_block = blocks
+        .iter()
+        .find(|b| b.len() > 1 && b[0] > 0)
+        .expect("expected a metadata block");
+    let content = String::from_utf8_lossy(&meta_block[1..]);
+    assert!(
+        content.contains("StreamUrl='http://example.com/cover.jpg'"),
+        "expected StreamUrl in metadata, got: {}",
+        content
+    );
 }

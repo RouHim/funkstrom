@@ -336,12 +336,13 @@ fn start_server(
         config.station.description.clone(),
         config.station.genre.clone(),
         timeline_rx,
+        config.server.public_url.clone(),
     );
 
-    let bind_address = config.server.bind_address.clone();
+    let public_url = config.server.public_url.clone();
     let port = config.server.port;
     tokio::spawn(async move {
-        if let Err(e) = server.start_server(&bind_address, port).await {
+        if let Err(e) = server.start_server(public_url, port).await {
             log::error!("Server failed: {}", e);
         }
     })
@@ -423,13 +424,15 @@ fn calculate_next_scan_duration(
 
     Ok(duration)
 }
-
 fn log_startup_info(config: &Config) {
-    log::info!(
-        "Starting Funkstrom server on {}:{}",
-        config.server.bind_address,
-        config.server.port
-    );
+    if let Some(ref url) = config.server.public_url {
+        log::info!("Starting Funkstrom server on {}", url);
+    } else {
+        log::info!(
+            "Starting Funkstrom server on 0.0.0.0:{}",
+            config.server.port
+        );
+    }
     log::info!("Music directory: {}", config.library.music_directory);
     log::info!("Station: {}", config.station.name);
 }
@@ -437,28 +440,38 @@ fn log_startup_info(config: &Config) {
 fn log_server_urls(config: &Config) {
     log::info!("Funkstrom server started successfully!");
 
+    let base_url = config.server.public_url.as_deref().unwrap_or("0.0.0.0");
+    let port = config.server.port;
+
     // Log all enabled stream URLs
     for (name, stream_config) in &config.stream {
         if stream_config.enabled {
-            log::info!(
-                "  Stream '{}': http://{}:{}/{} ({}kbps)",
-                name,
-                config.server.bind_address,
-                config.server.port,
-                name,
-                stream_config.bitrate
-            );
+            if config.server.public_url.is_some() {
+                log::info!(
+                    "  Stream '{}': {}/{} ({}kbps)",
+                    name,
+                    base_url,
+                    name,
+                    stream_config.bitrate
+                );
+            } else {
+                log::info!(
+                    "  Stream '{}': {}:{}/{} ({}kbps)",
+                    name,
+                    base_url,
+                    port,
+                    name,
+                    stream_config.bitrate
+                );
+            }
         }
     }
 
-    log::info!(
-        "Status URL: http://{}:{}/status",
-        config.server.bind_address,
-        config.server.port
-    );
-    log::info!(
-        "Info URL: http://{}:{}/",
-        config.server.bind_address,
-        config.server.port
-    );
+    if config.server.public_url.is_some() {
+        log::info!("Status URL: {}/status", base_url);
+        log::info!("Info URL: {}/", base_url);
+    } else {
+        log::info!("Status URL: {}:{}/status", base_url, port);
+        log::info!("Info URL: {}:{}/", base_url, port);
+    }
 }

@@ -27,7 +27,7 @@ Create `config.toml`:
 ```toml
 [server]
 port = 8284
-bind_address = "127.0.0.1"
+public_url = "http://127.0.0.1:8284"
 
 [library]
 music_directory = "/path/to/your/music"
@@ -73,35 +73,38 @@ divided into five main sections:
 
 ## Server Configuration
 
-The `[server]` section controls network binding and system paths.
+The `[server]` section controls network configuration and system paths.
 
 ### Options
 
-| Option         | Type    | Required | Default    | Description                           |
-| -------------- | ------- | -------- | ---------- | ------------------------------------- |
-| `port`         | integer | Yes      | -          | Port number for HTTP server (1-65535) |
-| `bind_address` | string  | Yes      | -          | IP address to bind to                 |
-| `ffmpeg_path`  | string  | No       | `"ffmpeg"` | Path to ffmpeg binary                 |
+| Option        | Type    | Required | Default    | Description                           |
+| ------------- | ------- | -------- | ---------- | ------------------------------------- |
+| `port`        | integer | Yes      | -          | Port number for HTTP server (1-65535) |
+| `public_url`  | string  | No       | `None`     | Public-facing base URL for clients    |
+| `ffmpeg_path` | string  | No       | `"ffmpeg"` | Path to ffmpeg binary                 |
 
 ### Details
 
 #### `port`
 
 The TCP port on which the HTTP server will listen for incoming connections. All streams and API endpoints will be
-accessible on this port.
+accessible on this port. The server always binds to `0.0.0.0` (all interfaces).
 
 - **Valid values**: 1-65535 (recommended: 8000-9000 or above 1024 to avoid requiring root)
 - **Example**: `8284`
 
-#### `bind_address`
+#### `public_url`
 
-The network interface address to bind to. This controls which network interfaces the server listens on.
+The public-facing base URL clients use to reach the server. This is used for:
+- Album art URLs in ICY metadata (`StreamUrl` field)
+- Stream and cover art links on the info page
+- Stream URLs in startup logs
 
-- **Values**:
-  - `"127.0.0.1"` - Listen only on localhost (local access only)
-  - `"0.0.0.0"` - Listen on all network interfaces (remote access allowed)
-  - Specific IP - Listen only on a specific interface
-- **Security note**: Use `127.0.0.1` for development or when using a reverse proxy
+If not set, album art and stream URLs will not be accessible to external clients, and a warning will be logged.
+
+- **Format**: Full URL including protocol and port (e.g., `http://radio.example.com:8284`)
+- **Example**: `"http://192.168.1.100:8284"` or `"https://radio.example.com"`
+- **When to use**: Essential when clients connect from other machines. Skip only for local-only use.
 
 #### `ffmpeg_path`
 
@@ -119,7 +122,7 @@ variable.
 ```toml
 [server]
 port = 8284
-bind_address = "127.0.0.1"
+public_url = "http://127.0.0.1:8284"
 ffmpeg_path = "/usr/bin/ffmpeg"
 ```
 
@@ -239,7 +242,7 @@ multiple simultaneous streams, allowing listeners to choose their preferred qual
 Each stream is defined with a unique name that becomes part of its URL:
 
 - Format: `[stream.<name>]`
-- URL: `http://<bind_address>:<port>/<name>`
+- URL: `<public_url>/<name>`
 - **Name requirements**: Only alphanumeric characters, underscores, or hyphens
 - **Examples**: `[stream.high]`, `[stream.mobile]`, `[stream.low_bandwidth]`
 
@@ -1064,7 +1067,7 @@ Bare minimum configuration for a simple local radio station:
 ```toml
 [server]
 port = 8284
-bind_address = "127.0.0.1"
+public_url = "http://127.0.0.1:8284"
 
 [library]
 music_directory = "/home/user/Music"
@@ -1092,7 +1095,7 @@ Production setup with multiple quality options:
 ```toml
 [server]
 port = 8284
-bind_address = "0.0.0.0"
+public_url = "http://radio.example.com:8284"
 ffmpeg_path = "/usr/bin/ffmpeg"
 
 [library]
@@ -1138,7 +1141,7 @@ Complete setup with multiple streams and scheduled programming:
 ```toml
 [server]
 port = 8284
-bind_address = "0.0.0.0"
+public_url = "http://radio.example.com:8284"
 ffmpeg_path = "/usr/bin/ffmpeg"
 
 [library]

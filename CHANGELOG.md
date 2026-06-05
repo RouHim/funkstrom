@@ -1,10 +1,11 @@
-## [1.2.2](https://github.com/RouHim/funkstrom/compare/1.2.1...1.2.2) (2026-06-04)
+## [1.2.3](https://github.com/RouHim/funkstrom/compare/1.2.2...1.2.3) (2026-06-05)
 
 
 ### Bug Fixes
 
-* **cli:** add --help/-h handling to manual arg parser ([3304966](https://github.com/RouHim/funkstrom/commit/33049663ff0a334c41ae62aac2637ec66677a7fb))
+* **server:** replace bind_address config with public_url to fix album art StreamUrl containing unroutable 0.0.0.0; add cover.jpg endpoint test coverage and empty track_path guard
 
+## [1.2.2](https://github.com/RouHim/funkstrom/compare/1.2.1...1.2.2) (2026-06-04)
 ## [1.2.1](https://github.com/RouHim/funkstrom/compare/1.2.0...1.2.1) (2026-06-04)
 
 

@@ -297,8 +297,8 @@ timeout 5 curl -s -N -H "Icy-MetaData: 1" "${BASE_URL}/stream" -o "$DATA_FILE" 2
 CURRENT_JSON=$(curl -s "${BASE_URL}/current")
 CURRENT_ARTIST=$(echo "$CURRENT_JSON" | jq -r '.artist')
 CURRENT_TITLE=$(echo "$CURRENT_JSON" | jq -r '.title')
-# Build expected metadata string — compare against the raw metadata bytes (not strings output)
-EXPECTED_ICY="StreamTitle='${CURRENT_ARTIST} - ${CURRENT_TITLE}';StreamUrl='';"
+# Build expected metadata string with public_url
+EXPECTED_ICY="StreamTitle='${CURRENT_ARTIST} - ${CURRENT_TITLE}';StreamUrl='http://127.0.0.1:3002/cover.jpg';"
 # Read first metadata block at position 16000
 BLOCK_COUNT_BYTE=$(od -An -tx1 -j 16000 -N1 "$DATA_FILE" | tr -d ' ')
 if [ -z "$BLOCK_COUNT_BYTE" ] || [ "$BLOCK_COUNT_BYTE" = "00" ]; then
@@ -318,7 +318,39 @@ else
     fi
 fi
 rm -f "$DATA_FILE"
-echo
+
+# Test 22: /cover.jpg endpoint responds (200 with image or 204 no content)
+echo "Test 22: /cover.jpg endpoint responds"
+HTTP_CODE=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "${BASE_URL}/cover.jpg")
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "204" ]; then
+    echo "  PASS: HTTP $HTTP_CODE"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: HTTP $HTTP_CODE"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test 23: /cover.jpg returns valid image data when available
+echo "Test 23: /cover.jpg returns valid content"
+COVER_FILE=$(mktemp)
+curl -s --max-time 5 "${BASE_URL}/cover.jpg" -o "$COVER_FILE"
+COVER_SIZE=$(stat -c%s "$COVER_FILE" 2>/dev/null || echo 0)
+if [ "$COVER_SIZE" -gt 0 ]; then
+    CONTENT_TYPE=$(curl -s --max-time 3 -D - "${BASE_URL}/cover.jpg" -o /dev/null 2>/dev/null | grep -i "Content-Type" | tr -d '\r')
+    FIRST_BYTES=$(od -An -tx1 -N4 "$COVER_FILE" | tr -d ' ')
+    if echo "$CONTENT_TYPE" | grep -qi "image/" && [ "${FIRST_BYTES:0:4}" = "ffd8" ]; then
+        echo "  PASS: ${COVER_SIZE} bytes, image/jpeg"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: size=$COVER_SIZE, content_type=$CONTENT_TYPE, first_bytes=$FIRST_BYTES"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "  PASS: no cover art (expected with test music)"
+    PASS=$((PASS + 1))
+fi
+rm -f "$COVER_FILE"
+
 echo "=== Results ==="
 echo "Passed: $PASS"
 echo "Failed: $FAIL"

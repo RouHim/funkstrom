@@ -1,6 +1,6 @@
 [server]
 port = 3002
-bind_address = "0.0.0.0"
+public_url = "http://127.0.0.1:3002"
 
 [library]
 music_directory = "test_music"

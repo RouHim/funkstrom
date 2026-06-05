@@ -8,8 +8,10 @@
 # Port to listen on for HTTP requests
 port = 8284
 
-# Bind address (use "0.0.0.0" to listen on all interfaces)
-bind_address = "127.0.0.1"
+# Public-facing URL clients use to reach this server (optional but recommended).
+# Used for album art URLs in ICY metadata, info page links, and startup logs.
+# If not set, the server still works but album art and stream URLs won't be accessible.
+public_url = "http://127.0.0.1:8284"
 
 # Path to ffmpeg binary (optional, will use PATH if not specified)
 ffmpeg_path = "/usr/bin/ffmpeg"
@@ -43,8 +45,7 @@ genre = "Various"
 # ============================================================================
 # Stream Configuration (Multi-Stream Support)
 # ============================================================================
-# You can define multiple streams with different quality settings.
-# Each stream will be available at: http://<bind_address>:<port>/<stream_name>
+# Each stream will be available at: <public_url>/<stream_name>
 #
 # Stream names must contain only alphanumeric characters, underscores, or hyphens.
 # Supported formats: mp3, aac, opus, ogg

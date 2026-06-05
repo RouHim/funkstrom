@@ -15,7 +15,7 @@ pub struct Config {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ServerConfig {
     pub port: u16,
-    pub bind_address: String,
+    pub public_url: Option<String>,
     pub ffmpeg_path: Option<String>,
 }
 
@@ -209,7 +209,7 @@ impl Default for Config {
         Self {
             server: ServerConfig {
                 port: 8284,
-                bind_address: "127.0.0.1".to_string(),
+                public_url: None,
                 ffmpeg_path: None,
             },
             library: LibraryConfig {
@@ -363,7 +363,7 @@ mod tests {
         let toml_content = r#"
 [server]
 port = 8284
-bind_address = "0.0.0.0"
+public_url = "http://example.com:8284"
 
 [library]
 music_directory = "/music"
@@ -408,7 +408,7 @@ enabled = true
         let toml_content = r#"
 [server]
 port = 8284
-bind_address = "0.0.0.0"
+public_url = "http://example.com:8284"
 
 [library]
 music_directory = "/music"
@@ -656,5 +656,63 @@ enabled = true
                 panic!("config.toml.example failed to parse: {}", e);
             }
         }
+    }
+
+    #[test]
+    fn test_public_url_parsed_from_toml() {
+        let toml_content = r#"
+[server]
+port = 8284
+public_url = "http://radio.example.com:8284"
+
+[library]
+music_directory = "/music"
+shuffle = true
+repeat = true
+
+[station]
+name = "Test Radio"
+description = "Test Description"
+genre = "Test"
+
+[stream.default]
+bitrate = 128
+format = "mp3"
+sample_rate = 44100
+channels = 2
+enabled = true
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(
+            config.server.public_url,
+            Some("http://radio.example.com:8284".to_string())
+        );
+    }
+
+    #[test]
+    fn test_public_url_missing_is_none() {
+        let toml_content = r#"
+[server]
+port = 8284
+
+[library]
+music_directory = "/music"
+shuffle = true
+repeat = true
+
+[station]
+name = "Test Radio"
+description = "Test Description"
+genre = "Test"
+
+[stream.default]
+bitrate = 128
+format = "mp3"
+sample_rate = 44100
+channels = 2
+enabled = true
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.server.public_url, None);
     }
 }

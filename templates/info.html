@@ -139,6 +139,26 @@
       margin-bottom: var(--sp-6);
     }
 
+    .now-playing-layout {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+    }
+
+    .cover-art {
+      width: 80px;
+      height: 80px;
+      border-radius: var(--radius-md);
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--bg-deep);
+    }
+
+    .now-playing-info {
+      flex: 1;
+      min-width: 0;
+    }
+
     .now-playing-label {
       font-size: 0.8rem;
       text-transform: uppercase;
@@ -466,11 +486,16 @@
 
     <main>
       <section class="now-playing" aria-label="Now Playing">
-        <div class="now-playing-label">Now Playing</div>
-        <div id="track-title">{{ current_track }}</div>
-        <div class="track-secondary">
-          <span id="track-artist"></span>
-          <span id="track-album">{{ album }}</span>
+        <div class="now-playing-layout">
+          <img class="cover-art" src="{{ cover_url }}" alt="Album cover" onerror="this.style.display='none'">
+          <div class="now-playing-info">
+            <div class="now-playing-label">Now Playing</div>
+            <div id="track-title">{{ current_track }}</div>
+            <div class="track-secondary">
+              <span id="track-artist"></span>
+              <span id="track-album">{{ album }}</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -493,7 +518,7 @@
           <div class="stream-url">{{ stream.url }}</div>
           {% endfor %}
         </div>
-        <p class="url-hint">Compatible with VLC, Winamp, iTunes, and most media players. Station bitrate: <span>{{ bitrate }}&nbsp;kbps</span>. Host: <span>{{ bind_address }}:{{ port }}</span>.</p>
+        <p class="url-hint">Compatible with VLC, Winamp, iTunes, and most media players. Station bitrate: <span>{{ bitrate }}&nbsp;kbps</span>. URL: <span>{{ public_url }}</span>.</p>
       </section>
     </main>
 

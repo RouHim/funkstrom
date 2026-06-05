@@ -431,6 +431,7 @@ dependencies = [
  "env_logger",
  "fastrand",
  "futures-core",
+ "id3",
  "log",
  "mimalloc",
  "r2d2",
