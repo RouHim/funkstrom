@@ -3,6 +3,13 @@
 
 ### Bug Fixes
 
+* replace bind_address with public_url to fix album art StreamUrl ([1415fb4](https://github.com/RouHim/funkstrom/commit/1415fb4a868069858e4110ee1585862448ae47a3))
+
+## [1.2.3](https://github.com/RouHim/funkstrom/compare/1.2.2...1.2.3) (2026-06-05)
+
+
+### Bug Fixes
+
 * **server:** replace bind_address config with public_url to fix album art StreamUrl containing unroutable 0.0.0.0; add cover.jpg endpoint test coverage and empty track_path guard
 
 ## [1.2.2](https://github.com/RouHim/funkstrom/compare/1.2.1...1.2.2) (2026-06-04)
