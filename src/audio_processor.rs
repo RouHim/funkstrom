@@ -310,24 +310,31 @@ impl FFmpegProcessor {
                             IDLE_GRACE_PERIOD_SECS
                         );
 
-                        tokio::select! {
-                            _ = listener_notify.notified() => {
-                                info!("Listener connected, resuming FFmpeg processing");
-                            }
-                            result = timeline_rx.changed() => {
-                                match result {
-                                    Ok(()) => {
-                                        let next_snapshot = timeline_rx.borrow_and_update().clone();
-                                        apply_snapshot_update(
-                                            next_snapshot,
-                                            &mut current_snapshot,
-                                            &mut current_process,
-                                            &mut consecutive_failures,
-                                        );
-                                    }
-                                    Err(_) => {
-                                        debug!("Timeline sender dropped, stopping timeline streaming service");
-                                        break;
+                        loop {
+                            tokio::select! {
+                                _ = listener_notify.notified() => {
+                                    info!("Listener connected, resuming FFmpeg processing");
+                                    break;
+                                }
+                                result = timeline_rx.changed() => {
+                                    match result {
+                                        Ok(()) => {
+                                            let next_snapshot = timeline_rx.borrow_and_update().clone();
+                                            apply_snapshot_update(
+                                                next_snapshot,
+                                                &mut current_snapshot,
+                                                &mut current_process,
+                                                &mut consecutive_failures,
+                                            );
+                                        }
+                                        Err(_) => {
+                                            debug!("Timeline sender dropped during idle pause, stopping timeline streaming service");
+                                            if let Some(process) = current_process.take() {
+                                                process.terminate();
+                                            }
+                                            is_paused.store(false, Ordering::SeqCst);
+                                            return;
+                                        }
                                     }
                                 }
                             }

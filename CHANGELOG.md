@@ -12,6 +12,10 @@
 
 * **audio:** pause FFmpeg when idle for 60s with no listeners ([91577cb](https://github.com/RouHim/funkstrom/commit/91577cb5aa088dd0cba02283e46785eb0c3551dc))
 
+### Bug Fixes
+
+* **audio:** fix idle FFmpeg thrashing where timeline ticks (~100ms) caused immediate restart after pause, defeating idle CPU savings; wrap idle-pause select in inner loop so only listener connect or sender-drop breaks the pause
+
 # [1.3.0](https://github.com/RouHim/funkstrom/compare/1.2.3...1.3.0) (2026-06-06)
 
 
