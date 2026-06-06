@@ -61,8 +61,7 @@ struct StreamLink {
 // RAII guard for listener tracking
 struct ListenerGuard {
     listeners: Arc<AtomicUsize>,
-    #[allow(dead_code)]
-    notify: Arc<tokio::sync::Notify>,
+    _notify: Arc<tokio::sync::Notify>,
 }
 
 impl ListenerGuard {
@@ -71,7 +70,10 @@ impl ListenerGuard {
         if was_zero {
             notify.notify_one();
         }
-        Self { listeners, notify }
+        Self {
+            listeners,
+            _notify: notify,
+        }
     }
 }
 

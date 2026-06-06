@@ -1,7 +1,5 @@
 use crate::audio_metadata::TrackMetadata;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
@@ -29,12 +27,10 @@ pub struct PlaybackDirector {
     pub track_started_at: Instant,
     pub generation: u64,
     pub snapshot_tx: watch::Sender<TimelineSnapshot>,
-    #[allow(dead_code)]
-    pub listener_count: Arc<AtomicUsize>,
 }
 
 impl PlaybackDirector {
-    pub fn new(playlist: Vec<TrackInfo>, listener_count: Arc<AtomicUsize>) -> Self {
+    pub fn new(playlist: Vec<TrackInfo>) -> Self {
         let track_started_at = Instant::now();
         let initial_snapshot = Self::snapshot_from_state(&playlist, 0, track_started_at, 0);
         let (snapshot_tx, _) = watch::channel(initial_snapshot);
@@ -45,7 +41,6 @@ impl PlaybackDirector {
             track_started_at,
             generation: 0,
             snapshot_tx,
-            listener_count,
         }
     }
 
@@ -70,7 +65,7 @@ impl PlaybackDirector {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn current_snapshot(&self) -> TimelineSnapshot {
         self.snapshot_tx.borrow().clone()
     }
@@ -196,7 +191,9 @@ impl PlaybackDirector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
+    use std::sync::Arc;
     use std::thread;
     use tokio::time::timeout;
 
@@ -212,9 +209,7 @@ mod tests {
 
     #[test]
     fn given_elapsed_exceeds_track_duration_when_tick_then_advances_to_next_track() {
-        let listeners = Arc::new(AtomicUsize::new(1));
-        let mut director =
-            PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 10)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 10)]);
 
         thread::sleep(Duration::from_millis(1100));
         director.tick();
@@ -226,9 +221,7 @@ mod tests {
 
     #[test]
     fn given_last_track_elapsed_when_tick_then_wraps_around_to_first_track() {
-        let listeners = Arc::new(AtomicUsize::new(1));
-        let mut director =
-            PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 1)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 1)]);
 
         director.current_index = 1;
         director.track_started_at = Instant::now() - Duration::from_millis(1100);
@@ -241,8 +234,7 @@ mod tests {
 
     #[test]
     fn given_empty_playlist_when_tick_then_does_not_panic_and_keeps_empty_snapshot() {
-        let listeners = Arc::new(AtomicUsize::new(0));
-        let mut director = PlaybackDirector::new(Vec::new(), listeners);
+        let mut director = PlaybackDirector::new(Vec::new());
 
         director.tick();
 
@@ -254,8 +246,7 @@ mod tests {
 
     #[test]
     fn given_new_playlist_when_replaced_then_resets_index_and_increments_generation() {
-        let listeners = Arc::new(AtomicUsize::new(1));
-        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
 
         director.current_index = 0;
         director.track_started_at = Instant::now() - Duration::from_secs(5);
@@ -270,8 +261,7 @@ mod tests {
 
     #[test]
     fn given_active_track_when_tick_then_elapsed_matches_wall_clock_within_200ms() {
-        let listeners = Arc::new(AtomicUsize::new(1));
-        let mut director = PlaybackDirector::new(vec![track("a.mp3", 100)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 100)]);
 
         thread::sleep(Duration::from_millis(300));
         director.tick();
@@ -282,9 +272,7 @@ mod tests {
 
     #[test]
     fn given_zero_duration_track_when_tick_then_skips_to_next_positive_duration_track() {
-        let listeners = Arc::new(AtomicUsize::new(1));
-        let mut director =
-            PlaybackDirector::new(vec![track("zero.mp3", 0), track("ok.mp3", 10)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("zero.mp3", 0), track("ok.mp3", 10)]);
 
         director.tick();
 
@@ -295,8 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn given_no_listeners_when_tick_then_encoding_always_active() {
-        let listeners = Arc::new(AtomicUsize::new(0));
-        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
         let mut snapshot_rx = director.snapshot_tx.subscribe();
 
         director.tick();
@@ -313,7 +300,7 @@ mod tests {
     #[tokio::test]
     async fn given_listeners_disconnect_when_tick_then_encoding_stays_active() {
         let listeners = Arc::new(AtomicUsize::new(1));
-        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)], listeners.clone());
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
 
         director.tick();
         assert_eq!(
@@ -331,9 +318,7 @@ mod tests {
 
     #[tokio::test]
     async fn given_zero_listeners_when_track_advances_then_snapshot_still_published() {
-        let listeners = Arc::new(AtomicUsize::new(0));
-        let mut director =
-            PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 10)], listeners);
+        let mut director = PlaybackDirector::new(vec![track("a.mp3", 1), track("b.mp3", 10)]);
         director.track_started_at = Instant::now() - Duration::from_millis(1100);
         let mut snapshot_rx = director.snapshot_tx.subscribe();
 

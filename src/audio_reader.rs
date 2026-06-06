@@ -1,4 +1,3 @@
-use crate::audio_metadata::TrackMetadata;
 use crate::hearthis_client::{HearthisClient, HearthisTrack};
 use crate::library_db::LibraryDatabase;
 use crate::playback_director::{PlaybackDirector, TrackInfo};
@@ -22,8 +21,6 @@ struct PendingLiveset {
 
 pub struct AudioReader {
     library_shuffle: bool,
-    #[allow(dead_code)]
-    library_repeat: bool,
     db: LibraryDatabase,
     shuffle_seed: u64,
 }
@@ -32,7 +29,6 @@ impl AudioReader {
     pub fn new(
         _music_directory: PathBuf,
         shuffle: bool,
-        repeat: bool,
         db: LibraryDatabase,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let tracks = db.get_all_tracks()?;
@@ -50,18 +46,11 @@ impl AudioReader {
 
         Ok(Self {
             library_shuffle: shuffle,
-            library_repeat: repeat,
             db,
             shuffle_seed,
         })
     }
 
-    #[allow(dead_code)]
-    pub fn get_current_metadata(&self) -> Arc<Mutex<TrackMetadata>> {
-        Arc::new(Mutex::new(TrackMetadata::default()))
-    }
-
-    #[allow(dead_code)]
     pub fn build_playlist(&self) -> Vec<TrackInfo> {
         let tracks = match self.db.get_all_tracks() {
             Ok(tracks) => tracks,
@@ -320,7 +309,7 @@ mod tests {
             ("/music/d.mp3", Some(240)),
         ]);
 
-        let reader1 = AudioReader::new(PathBuf::from("/music"), true, true, db.clone()).unwrap();
+        let reader1 = AudioReader::new(PathBuf::from("/music"), true, db.clone()).unwrap();
 
         let playlist1 = reader1.build_playlist();
         let playlist2 = reader1.build_playlist();
@@ -341,7 +330,7 @@ mod tests {
             ("/music/c.mp3", Some(300)),
         ]);
 
-        let reader = AudioReader::new(PathBuf::from("/music"), false, true, db).unwrap();
+        let reader = AudioReader::new(PathBuf::from("/music"), false, db).unwrap();
         let playlist = reader.build_playlist();
 
         assert_eq!(playlist.len(), 3);
@@ -360,7 +349,7 @@ mod tests {
             ("/music/e.mp3", Some(260)),
         ]);
 
-        let reader = AudioReader::new(PathBuf::from("/music"), true, true, db.clone()).unwrap();
+        let reader = AudioReader::new(PathBuf::from("/music"), true, db.clone()).unwrap();
         let playlist = reader.build_playlist();
         let db_tracks = db.get_all_tracks().unwrap();
         let db_paths: Vec<String> = db_tracks.iter().map(|t| t.file_path.clone()).collect();
@@ -382,7 +371,7 @@ mod tests {
             ("/music/c.mp3", Some(220)),
         ]);
 
-        let reader = AudioReader::new(PathBuf::from("/music"), false, true, db.clone()).unwrap();
+        let reader = AudioReader::new(PathBuf::from("/music"), false, db.clone()).unwrap();
         let playlist = reader.build_playlist();
 
         let db_tracks = db.get_all_tracks().unwrap();

@@ -191,8 +191,7 @@ fn setup_audio_pipeline(
     schedule_rx: Option<Receiver<PlaylistCommand>>,
 ) -> Result<AudioPipeline, Box<dyn std::error::Error + Send + Sync>> {
     let music_dir = PathBuf::from(&config.library.music_directory);
-    let audio_reader =
-        AudioReader::new(music_dir, config.library.shuffle, config.library.repeat, db)?;
+    let audio_reader = AudioReader::new(music_dir, config.library.shuffle, db)?;
 
     let initial_playlist = audio_reader.build_playlist();
 
@@ -201,10 +200,7 @@ fn setup_audio_pipeline(
     }
 
     let listener_count = Arc::new(AtomicUsize::new(0));
-    let director = Arc::new(Mutex::new(PlaybackDirector::new(
-        initial_playlist,
-        listener_count.clone(),
-    )));
+    let director = Arc::new(Mutex::new(PlaybackDirector::new(initial_playlist)));
 
     {
         let director = director.clone();

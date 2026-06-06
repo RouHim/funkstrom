@@ -1,5 +1,7 @@
 use bytes::Bytes;
-use crossbeam_channel::{unbounded, Receiver, Sender};
+#[cfg(test)]
+use crossbeam_channel::unbounded;
+use crossbeam_channel::Sender;
 use log::{debug, error, info, warn};
 use std::io::ErrorKind;
 use std::io::{BufReader, Read};
@@ -161,31 +163,6 @@ impl FFmpegProcessor {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn start_conversion_process(
-        &self,
-        input_path: &Path,
-        metadata: Option<&TrackMetadata>,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        let input_str = input_path.to_str().ok_or_else(|| {
-            format!(
-                "Path contains invalid UTF-8 characters: {}",
-                input_path.display()
-            )
-        })?;
-        self.start_conversion(input_str, metadata)
-    }
-
-    #[allow(dead_code)]
-    pub fn start_conversion_from_url(
-        &self,
-        url: &str,
-        metadata: Option<&TrackMetadata>,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion(url, metadata)
-    }
-
-    #[allow(dead_code)]
     pub fn start_conversion_with_seek(
         &self,
         input: &str,
@@ -193,15 +170,6 @@ impl FFmpegProcessor {
         metadata: Option<&TrackMetadata>,
     ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
         self.start_conversion_internal(input, seek_offset_secs, metadata)
-    }
-
-    #[allow(dead_code)]
-    fn start_conversion(
-        &self,
-        input: &str,
-        metadata: Option<&TrackMetadata>,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion_internal(input, None, metadata)
     }
 
     fn build_ffmpeg_args(
@@ -285,137 +253,6 @@ impl FFmpegProcessor {
         let child = cmd.spawn()?;
 
         Ok(AudioProcess::new(child))
-    }
-
-    #[allow(dead_code)]
-    pub fn start_streaming_service(
-        self,
-        legacy_track_queue_rx: Receiver<std::path::PathBuf>,
-        listener_count: Arc<AtomicUsize>,
-        listener_notify: Arc<Notify>,
-        is_paused: Arc<AtomicBool>,
-    ) -> Receiver<AudioChunk> {
-        let (audio_tx, audio_rx) = unbounded::<AudioChunk>();
-
-        tokio::spawn(async move {
-            let mut current_process: Option<AudioProcess> = None;
-            let mut current_track: Option<std::path::PathBuf> = None;
-            let mut consecutive_failures: u32 = 0;
-            let mut idle_since: Option<Instant> = None;
-
-            loop {
-                // Start new process if needed
-                if current_process.is_none() {
-                    let listener_count_val = listener_count.load(Ordering::SeqCst);
-
-                    if listener_count_val == 0 {
-                        if idle_since.is_none() {
-                            idle_since = Some(Instant::now());
-                            info!("No listeners, entering grace period");
-                        } else if idle_since
-                            .as_ref()
-                            .map(|start| start.elapsed().as_secs() > IDLE_GRACE_PERIOD_SECS)
-                            .unwrap_or(false)
-                        {
-                            is_paused.store(true, Ordering::SeqCst);
-                            info!(
-                                "No listeners for {}s, pausing FFmpeg processing",
-                                IDLE_GRACE_PERIOD_SECS
-                            );
-
-                            tokio::select! {
-                                _ = listener_notify.notified() => {
-                                    is_paused.store(false, Ordering::SeqCst);
-                                    info!("Listener connected, resuming FFmpeg processing");
-                                    idle_since = None;
-                                }
-                            }
-
-                            continue;
-                        }
-                    } else {
-                        idle_since = None;
-                    }
-
-                    if listener_count_val > 0 {
-                        is_paused.store(false, Ordering::SeqCst);
-
-                        // Try to get next track
-                        if let Ok(track) = legacy_track_queue_rx.try_recv() {
-                            current_track = Some(track.clone());
-
-                            // Check if track is a URL or local file
-                            let track_str = track.to_str().unwrap_or("");
-                            let result = if track_str.starts_with("http://")
-                                || track_str.starts_with("https://")
-                            {
-                                info!("Starting stream from URL: {}", track_str);
-                                self.start_conversion_from_url(track_str, None)
-                            } else {
-                                self.start_conversion_process(&track, None)
-                            };
-
-                            match result {
-                                Ok(process) => {
-                                    debug!("Started processing track: {:?}", track);
-                                    current_process = Some(process);
-                                }
-                                Err(e) => {
-                                    error!("Failed to start FFmpeg process for {:?}: {}", track, e);
-                                    consecutive_failures += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Read from current process
-                if let Some(ref mut process) = current_process {
-                    match process.read_chunk() {
-                        Ok(Some(chunk)) => {
-                            let audio_chunk = AudioChunk { data: chunk };
-
-                            if audio_tx.send(audio_chunk).is_err() {
-                                warn!("Failed to send audio chunk - receiver dropped");
-                                break;
-                            }
-                            consecutive_failures = 0;
-                        }
-                        Ok(None) => {
-                            // Process finished successfully
-                            info!("Track completed: {:?}", current_track);
-                            current_process = None;
-                            current_track = None;
-                            consecutive_failures = 0;
-                        }
-                        Err(e) => {
-                            let error_message = e.to_string();
-                            if error_message.contains("non-zero status") {
-                                debug!(
-                                    "FFmpeg process failed for {:?}: {}",
-                                    current_track, error_message
-                                );
-                            } else {
-                                error!("Error reading from FFmpeg process: {}", error_message);
-                            }
-                            current_process = None;
-                            current_track = None;
-                            consecutive_failures += 1;
-                        }
-                    }
-                }
-
-                // Small delay to avoid busy waiting
-                let delay_ms = if consecutive_failures > 0 {
-                    calculate_backoff_ms(consecutive_failures)
-                } else {
-                    PROCESS_POLL_INTERVAL_MS
-                };
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-            }
-        });
-
-        audio_rx
     }
 
     pub fn start_timeline_streaming_service(
@@ -717,7 +554,6 @@ impl AudioProcess {
         }
     }
 
-    #[allow(dead_code)]
     fn terminate(mut self) {
         if let Err(e) = self.child.kill() {
             debug!("Unable to kill FFmpeg process cleanly: {}", e);
