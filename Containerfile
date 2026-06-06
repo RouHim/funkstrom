@@ -37,6 +37,7 @@ RUN mkdir "/empty_dir"
 
 # Copy source code
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
 COPY openapi.yaml ./
 COPY src/ src/
 COPY templates/ templates/
