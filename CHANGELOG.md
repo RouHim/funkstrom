@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/RouHim/funkstrom/compare/1.3.0...1.4.0) (2026-06-06)
+
+
+### Features
+
+* **audio:** pause FFmpeg when idle for 60s with no listeners ([91577cb](https://github.com/RouHim/funkstrom/commit/91577cb5aa088dd0cba02283e46785eb0c3551dc))
+
 # [1.3.0](https://github.com/RouHim/funkstrom/compare/1.2.3...1.3.0) (2026-06-06)
 
 
