@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/RouHim/funkstrom/compare/1.4.0...1.4.1) (2026-06-06)
+
+
+### Bug Fixes
+
+* **ci:** copy build.rs into container build context ([f745651](https://github.com/RouHim/funkstrom/commit/f745651760cf05f34687f7976d5cdbdaa86eba61))
+
 # [1.4.0](https://github.com/RouHim/funkstrom/compare/1.3.0...1.4.0) (2026-06-06)
 
 
