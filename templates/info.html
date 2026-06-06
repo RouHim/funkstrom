@@ -300,6 +300,12 @@
       border-color: var(--border-accent);
     }
 
+    .version {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
     /* ── Player Bar ── */
     .player-bar {
       position: fixed;
@@ -526,6 +532,7 @@
       <a href="/status" class="dev-link">Status JSON</a>
       <a href="/current" class="dev-link">Current Track</a>
       <a href="/api-docs" class="dev-link">API Docs</a>
+      <span class="version">{{ version }}</span>
     </footer>
   </div>
 

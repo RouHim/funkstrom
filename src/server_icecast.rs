@@ -15,6 +15,7 @@ use tokio::sync::{mpsc, watch};
 use warp::{http::HeaderMap, Filter, Reply};
 
 // JSON response structures for serialization
+const VERSION: &str = include_str!(concat!(env!("OUT_DIR"), "/version.txt"));
 #[derive(Serialize)]
 struct StatusResponse {
     station_name: String,
@@ -22,6 +23,7 @@ struct StatusResponse {
     station_genre: String,
     streams: Vec<StreamStatus>,
     uptime: String,
+    version: String,
 }
 
 #[derive(Serialize)]
@@ -46,6 +48,7 @@ struct InfoPageContext {
     streams: Vec<StreamLink>,
     first_stream: String,
     cover_url: String,
+    version: String,
 }
 
 #[derive(Serialize)]
@@ -241,6 +244,7 @@ fn render_info_page(ctx: &InfoPageContext, template: &str) -> String {
         .replace("{{ bitrate }}", &ctx.bitrate.to_string())
         .replace("{{ public_url }}", &ctx.public_url)
         .replace("{{ cover_url }}", &ctx.cover_url)
+        .replace("{{ version }}", &ctx.version)
 }
 
 impl IcecastServer {
@@ -585,6 +589,7 @@ impl IcecastServer {
                 let s = elapsed % 60;
                 format!("{}h {}m {}s", h, m, s)
             },
+            version: VERSION.to_string(),
         };
 
         let json = serde_json::to_string(&response).map_err(|e| {
@@ -678,6 +683,7 @@ impl IcecastServer {
             streams,
             first_stream,
             cover_url: format!("{}/cover.jpg", base_url),
+            version: VERSION.to_string(),
         };
 
         const TEMPLATE_STR: &str = include_str!("../templates/info.html");
