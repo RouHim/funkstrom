@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/RouHim/funkstrom/compare/1.2.3...1.3.0) (2026-06-06)
+
+
+### Features
+
+* show build version in web UI ([87f103c](https://github.com/RouHim/funkstrom/commit/87f103c3dc774e15441765f923f955641f2429ec))
+
 ## [1.2.3](https://github.com/RouHim/funkstrom/compare/1.2.2...1.2.3) (2026-06-05)
 
 
