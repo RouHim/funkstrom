@@ -4,6 +4,7 @@
 ### Features
 
 * show build version in web UI ([87f103c](https://github.com/RouHim/funkstrom/commit/87f103c3dc774e15441765f923f955641f2429ec))
+* **audio:** pause FFmpeg transcoding when no listeners for 60s to reduce idle CPU to near zero; resume on first listener connect or timeline change
 
 ## [1.2.3](https://github.com/RouHim/funkstrom/compare/1.2.2...1.2.3) (2026-06-05)
 

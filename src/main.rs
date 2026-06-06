@@ -270,6 +270,8 @@ fn setup_audio_pipeline(
             timeline_rx_stream,
             audio_tx,
             is_paused.clone(),
+            listeners.clone(),
+            notify.clone(),
         );
 
         stream_pipelines.push(StreamPipeline {

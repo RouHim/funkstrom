@@ -18,7 +18,6 @@ const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
 const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
 const INITIAL_BACKOFF_MS: u64 = 1000;
 const MAX_BACKOFF_MS: u64 = 5_000;
-#[allow(dead_code)]
 const IDLE_GRACE_PERIOD_SECS: u64 = 60;
 
 fn looks_like_filesystem_path(value: &str) -> bool {
@@ -419,17 +418,19 @@ impl FFmpegProcessor {
         audio_rx
     }
 
-    #[allow(dead_code)]
     pub fn start_timeline_streaming_service(
         self,
         mut timeline_rx: watch::Receiver<TimelineSnapshot>,
         chunk_tx: Sender<AudioChunk>,
         is_paused: Arc<AtomicBool>,
+        listener_count: Arc<AtomicUsize>,
+        listener_notify: Arc<Notify>,
     ) {
         tokio::spawn(async move {
             let mut current_process: Option<AudioProcess> = None;
             let mut current_snapshot = timeline_rx.borrow().clone();
             let mut consecutive_failures: u32 = 0;
+            let mut idle_since: Option<Instant> = None;
 
             let apply_snapshot_update =
                 |next_snapshot: TimelineSnapshot,
@@ -453,6 +454,56 @@ impl FFmpegProcessor {
                 };
 
             loop {
+                // Idle detection: pause FFmpeg when no listeners
+                if listener_count.load(Ordering::SeqCst) == 0 {
+                    if idle_since.is_none() {
+                        idle_since = Some(Instant::now());
+                        info!("No listeners, entering grace period");
+                    } else if idle_since
+                        .as_ref()
+                        .map(|start| start.elapsed().as_secs() > IDLE_GRACE_PERIOD_SECS)
+                        .unwrap_or(false)
+                    {
+                        if let Some(process) = current_process.take() {
+                            process.terminate();
+                        }
+                        is_paused.store(true, Ordering::SeqCst);
+                        info!(
+                            "No listeners for {}s, pausing FFmpeg processing",
+                            IDLE_GRACE_PERIOD_SECS
+                        );
+
+                        tokio::select! {
+                            _ = listener_notify.notified() => {
+                                info!("Listener connected, resuming FFmpeg processing");
+                            }
+                            result = timeline_rx.changed() => {
+                                match result {
+                                    Ok(()) => {
+                                        let next_snapshot = timeline_rx.borrow_and_update().clone();
+                                        apply_snapshot_update(
+                                            next_snapshot,
+                                            &mut current_snapshot,
+                                            &mut current_process,
+                                            &mut consecutive_failures,
+                                        );
+                                    }
+                                    Err(_) => {
+                                        debug!("Timeline sender dropped, stopping timeline streaming service");
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        is_paused.store(false, Ordering::SeqCst);
+                        idle_since = None;
+                        continue;
+                    }
+                } else {
+                    idle_since = None;
+                }
+
                 {
                     let next_snapshot = timeline_rx.borrow_and_update().clone();
                     let generation_changed =
@@ -934,8 +985,16 @@ exit 0
             watch::channel(snapshot_with("https://example.com/ungated-stream", 0));
         let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
         let is_paused = Arc::new(AtomicBool::new(false));
+        let listener_count = Arc::new(AtomicUsize::new(0));
+        let listener_notify = Arc::new(Notify::new());
 
-        processor.start_timeline_streaming_service(timeline_rx, chunk_tx, is_paused);
+        processor.start_timeline_streaming_service(
+            timeline_rx,
+            chunk_tx,
+            is_paused,
+            listener_count,
+            listener_notify,
+        );
 
         let recv_result =
             tokio::task::spawn_blocking(move || chunk_rx.recv_timeout(Duration::from_millis(300)))
@@ -971,8 +1030,16 @@ exit 1
             watch::channel(snapshot_with("https://example.com/failing-stream", 0));
         let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
         let is_paused = Arc::new(AtomicBool::new(false));
+        let listener_count = Arc::new(AtomicUsize::new(0));
+        let listener_notify = Arc::new(Notify::new());
 
-        processor.start_timeline_streaming_service(timeline_rx, chunk_tx, is_paused);
+        processor.start_timeline_streaming_service(
+            timeline_rx,
+            chunk_tx,
+            is_paused,
+            listener_count,
+            listener_notify,
+        );
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -1005,8 +1072,16 @@ exit 1
             watch::channel(snapshot_with("https://example.com/stream", 0));
         let (chunk_tx, _chunk_rx) = unbounded::<AudioChunk>();
         let is_paused = Arc::new(AtomicBool::new(false));
+        let listener_count = Arc::new(AtomicUsize::new(0));
+        let listener_notify = Arc::new(Notify::new());
 
-        processor.start_timeline_streaming_service(timeline_rx, chunk_tx, Arc::clone(&is_paused));
+        processor.start_timeline_streaming_service(
+            timeline_rx,
+            chunk_tx,
+            Arc::clone(&is_paused),
+            listener_count,
+            listener_notify,
+        );
 
         tokio::time::sleep(Duration::from_millis(80)).await;
         drop(timeline_tx);
@@ -1090,6 +1165,87 @@ exit 1
         assert!(
             !args.iter().any(|a| a == "-metadata"),
             "No -metadata args when metadata is None"
+        );
+    }
+    // --- Idle detection tests ---
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn given_listeners_present_when_processing_then_idle_detection_is_noop() {
+        // With listener_count > 0, idle detection should never engage.
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+printf 'audio'
+exit 0
+"#,
+        );
+
+        let processor =
+            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) =
+            watch::channel(snapshot_with("https://example.com/active-stream", 0));
+        let (chunk_tx, chunk_rx) = unbounded::<AudioChunk>();
+        let is_paused = Arc::new(AtomicBool::new(false));
+        let listener_count = Arc::new(AtomicUsize::new(1)); // Listeners present
+        let listener_notify = Arc::new(Notify::new());
+
+        processor.start_timeline_streaming_service(
+            timeline_rx,
+            chunk_tx,
+            Arc::clone(&is_paused),
+            listener_count,
+            listener_notify,
+        );
+
+        let recv_result =
+            tokio::task::spawn_blocking(move || chunk_rx.recv_timeout(Duration::from_millis(300)))
+                .await
+                .expect("blocking receiver task should join successfully");
+        drop(timeline_tx);
+
+        assert!(
+            recv_result.is_ok(),
+            "expected audio to stream normally when listeners are present"
+        );
+        assert!(
+            !is_paused.load(Ordering::SeqCst),
+            "is_paused should never become true when listeners are present"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn given_no_listeners_when_grace_period_not_expired_then_is_paused_stays_false() {
+        // With listener_count = 0 but grace period not expired, is_paused stays false.
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+printf 'audio'
+exit 0
+"#,
+        );
+
+        let processor =
+            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+        let (timeline_tx, timeline_rx) =
+            watch::channel(snapshot_with("https://example.com/idle-grace-stream", 0));
+        let (chunk_tx, _chunk_rx) = unbounded::<AudioChunk>();
+        let is_paused = Arc::new(AtomicBool::new(false));
+        let listener_count = Arc::new(AtomicUsize::new(0)); // No listeners
+        let listener_notify = Arc::new(Notify::new());
+
+        processor.start_timeline_streaming_service(
+            timeline_rx,
+            chunk_tx,
+            Arc::clone(&is_paused),
+            listener_count,
+            listener_notify,
+        );
+
+        // Wait well under the 60s grace period
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        drop(timeline_tx);
+
+        assert!(
+            !is_paused.load(Ordering::SeqCst),
+            "is_paused should stay false before grace period expires"
         );
     }
 }
