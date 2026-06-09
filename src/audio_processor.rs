@@ -1039,10 +1039,19 @@ exit 0
             listener_notify,
         );
 
-        let recv_result =
-            tokio::task::spawn_blocking(move || chunk_rx.recv_timeout(Duration::from_millis(300)))
-                .await
-                .expect("blocking receiver task should join successfully");
+        // Use try_recv loop instead of spawn_blocking so the current_thread runtime
+        // can poll the streaming task between attempts.
+        let recv_result = loop {
+            match chunk_rx.try_recv() {
+                Ok(chunk) => break Ok(chunk),
+                Err(crossbeam_channel::TryRecvError::Empty) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    break Err(());
+                }
+            }
+        };
         drop(timeline_tx);
 
         assert!(
