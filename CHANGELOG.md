@@ -1,3 +1,11 @@
+## [1.4.2](https://github.com/RouHim/funkstrom/compare/1.4.1...1.4.2) (2026-06-09)
+
+
+### Bug Fixes
+
+* **audio:** prevent idle FFmpeg thrashing after pause ([106533f](https://github.com/RouHim/funkstrom/commit/106533f461707aeca2bcd6c17aecc8385ee5491f))
+* **test:** replace spawn_blocking with try_recv loop in idle-detection test ([b0d6acc](https://github.com/RouHim/funkstrom/commit/b0d6acc381ecba5a0cd0b0d6d070bb25544b18c6))
+
 ## [1.4.1](https://github.com/RouHim/funkstrom/compare/1.4.0...1.4.1) (2026-06-06)
 
 
