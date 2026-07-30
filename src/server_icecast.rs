@@ -49,6 +49,8 @@ struct InfoPageContext {
     first_stream: String,
     cover_url: String,
     version: String,
+    listeners: usize,
+    uptime: String,
 }
 
 #[derive(Serialize)]
@@ -247,6 +249,8 @@ fn render_info_page(ctx: &InfoPageContext, template: &str) -> String {
         .replace("{{ public_url }}", &ctx.public_url)
         .replace("{{ cover_url }}", &ctx.cover_url)
         .replace("{{ version }}", &ctx.version)
+        .replace("{{ listeners }}", &ctx.listeners.to_string())
+        .replace("{{ uptime }}", &ctx.uptime)
 }
 
 impl IcecastServer {
@@ -673,6 +677,16 @@ impl IcecastServer {
             .map(|s| s.name.clone())
             .unwrap_or_else(|| "stream".to_string());
         let first_bitrate = self.streams.first().map(|s| s.bitrate).unwrap_or(128);
+        let total_listeners: usize = self
+            .streams
+            .iter()
+            .map(|s| s.listeners.load(Ordering::SeqCst))
+            .sum();
+
+        let uptime = {
+            let elapsed = self.start_time.elapsed().as_secs();
+            format!("{}h {}m", elapsed / 3600, (elapsed % 3600) / 60)
+        };
 
         let context = InfoPageContext {
             station_name: self.station_name.clone(),
@@ -686,6 +700,8 @@ impl IcecastServer {
             first_stream,
             cover_url: format!("{}/cover.jpg", base_url),
             version: VERSION.to_string(),
+            listeners: total_listeners,
+            uptime,
         };
 
         const TEMPLATE_STR: &str = include_str!("../templates/info.html");
