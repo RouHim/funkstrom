@@ -362,6 +362,15 @@ impl IcecastServer {
             }
         });
 
+        let favicon_bytes: &'static [u8] = include_bytes!("../favicon.ico");
+        let favicon_route = warp::path("favicon.ico").and(warp::get()).map(move || {
+            warp::reply::with_header(
+                favicon_bytes,
+                "Content-Type",
+                "image/x-icon",
+            )
+        });
+
         let current_route = warp::path("current").and(warp::get()).and_then({
             let server = Arc::clone(&server);
             move || {
@@ -388,7 +397,8 @@ impl IcecastServer {
             .or(cover_route)
             .or(swagger_ui_route)
             .or(openapi_spec_route)
-            .or(info_route);
+            .or(info_route)
+            .or(favicon_route);
         let bind_addr = "0.0.0.0";
         if let Some(ref url) = public_url {
             log::info!("Starting Funkstrom server on {}", url);
