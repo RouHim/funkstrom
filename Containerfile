@@ -39,6 +39,7 @@ RUN mkdir "/empty_dir"
 COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY openapi.yaml ./
+COPY favicon.ico ./
 COPY src/ src/
 COPY templates/ templates/
 
