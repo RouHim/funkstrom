@@ -363,13 +363,9 @@ impl IcecastServer {
         });
 
         let favicon_bytes: &'static [u8] = include_bytes!("../favicon.ico");
-        let favicon_route = warp::path("favicon.ico").and(warp::get()).map(move || {
-            warp::reply::with_header(
-                favicon_bytes,
-                "Content-Type",
-                "image/x-icon",
-            )
-        });
+        let favicon_route = warp::path("favicon.ico")
+            .and(warp::get())
+            .map(move || warp::reply::with_header(favicon_bytes, "Content-Type", "image/x-icon"));
 
         let current_route = warp::path("current").and(warp::get()).and_then({
             let server = Arc::clone(&server);
