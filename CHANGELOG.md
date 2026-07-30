@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/RouHim/funkstrom/compare/1.5.0...1.5.1) (2026-07-30)
+
+
+### Bug Fixes
+
+* add favicon.ico to Containerfile COPY for Docker builds ([c95a50a](https://github.com/RouHim/funkstrom/commit/c95a50a26f25432e1931b5588d91bfe929c7593c))
+
 # [1.5.0](https://github.com/RouHim/funkstrom/compare/1.4.36...1.5.0) (2026-07-30)
 
 
