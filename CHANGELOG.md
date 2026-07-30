@@ -1,3 +1,15 @@
+# [1.5.0](https://github.com/RouHim/funkstrom/compare/1.4.36...1.5.0) (2026-07-30)
+
+
+### Bug Fixes
+
+* cargo fmt ([13a563d](https://github.com/RouHim/funkstrom/commit/13a563d7d0e0cd55250069fb6239c5fe5fec199a))
+
+
+### Features
+
+* replace logo/banner with IconKitchen broadcast tower icon, add favicon route ([de4270a](https://github.com/RouHim/funkstrom/commit/de4270a120bb44bacb5b0776ca859d48dbc823d3))
+
 ## [1.4.36](https://github.com/RouHim/funkstrom/compare/1.4.35...1.4.36) (2026-07-27)
 
 ## [1.4.35](https://github.com/RouHim/funkstrom/compare/1.4.34...1.4.35) (2026-07-27)
