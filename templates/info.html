@@ -59,50 +59,50 @@
       padding: 32px 20px 16px;
     }
 
-    /* ── Hero / Now Playing ── */
-    .np-hero {
-      margin-bottom: 28px;
-    }
-
-    .np-layout {
+    /* ── Player Bar (bottom, always visible) ── */
+    .player-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
       display: flex;
-      gap: 20px;
       align-items: center;
+      gap: 12px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--border-strong);
+      padding: 10px 18px;
+      min-height: 72px;
     }
 
-    .cover {
-      width: 120px;
-      height: 120px;
-      border-radius: var(--radius-lg);
+    .player-cover {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--radius-sm);
       object-fit: cover;
       flex-shrink: 0;
-      background: var(--bg-elevated);
-      transition: transform 0.3s ease;
-    }
-    .cover:hover {
-      transform: scale(1.02);
+      background: var(--bg-surface);
     }
 
-    .np-details {
-      min-width: 0;
+    .player-info {
       flex: 1;
+      min-width: 0;
     }
 
-    .np-eyebrow {
+    .player-eyebrow {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      font-size: 0.75rem;
+      gap: 6px;
+      font-size: 0.65rem;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       color: var(--cyan);
-      margin-bottom: 6px;
     }
 
     .live-dot {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: var(--cyan);
       display: inline-block;
@@ -111,55 +111,46 @@
 
     @keyframes pulse {
       0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(8,145,178,0.6); }
-      50% { opacity: 0.5; box-shadow: 0 0 0 4px rgba(8,145,178,0); }
+      50% { opacity: 0.5; box-shadow: 0 0 0 3px rgba(8,145,178,0); }
     }
 
-    .np-title {
-      font-size: 1.25rem;
+    .player-track {
+      font-size: 0.82rem;
       font-weight: 600;
-      line-height: 1.3;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
       color: var(--text-primary);
-      margin-bottom: 4px;
-      word-break: break-word;
+      line-height: 1.3;
     }
 
-    .np-meta {
-      font-size: 0.9rem;
+    .player-meta {
+      font-size: 0.72rem;
       color: var(--text-secondary);
-      margin-bottom: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .np-sep {
-      margin: 0 6px;
+      margin: 0 4px;
       color: var(--text-muted);
     }
 
-    .np-stats {
+    .player-stats {
       display: flex;
-      gap: 20px;
-      font-size: 0.8rem;
+      gap: 12px;
+      font-size: 0.68rem;
       color: var(--text-muted);
     }
 
     .np-listeners {}
     .np-bitrate {
-      padding: 2px 8px;
+      padding: 1px 6px;
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-sm);
       font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
-      font-size: 0.75rem;
-    }
-
-    /* ── Player Bar ── */
-    .player-bar {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-strong);
-      border-radius: var(--radius-lg);
-      padding: 10px 18px;
-      margin-bottom: 28px;
+      font-size: 0.65rem;
     }
 
     .play-btn {
@@ -188,35 +179,16 @@
       fill: currentColor;
     }
 
-    .player-info {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .player-track {
-      font-size: 0.85rem;
-      font-weight: 500;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      color: var(--text-primary);
-    }
-
-    .player-stream-label {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-    }
-
     .volume-wrap {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 4px;
       flex-shrink: 0;
     }
 
     .volume-icon {
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
       color: var(--text-muted);
       flex-shrink: 0;
     }
@@ -224,8 +196,8 @@
     .volume-slider {
       -webkit-appearance: none;
       appearance: none;
-      width: 80px;
-      height: 4px;
+      width: 64px;
+      height: 3px;
       border-radius: 2px;
       background: var(--border-strong);
       outline: none;
@@ -233,19 +205,15 @@
     .volume-slider::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
-      width: 12px;
-      height: 12px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: var(--cyan);
       cursor: pointer;
-      transition: transform 0.15s;
-    }
-    .volume-slider::-webkit-slider-thumb:hover {
-      transform: scale(1.3);
     }
     .volume-slider::-moz-range-thumb {
-      width: 12px;
-      height: 12px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: var(--cyan);
       cursor: pointer;
@@ -254,15 +222,22 @@
 
     .audio-error {
       color: #f87171;
-      font-size: 0.75rem;
-      margin-top: 4px;
+      font-size: 0.68rem;
+      margin-top: 2px;
       display: none;
     }
     .audio-error.visible {
       display: block;
     }
 
+    .player-stream-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+
     /* ── Streams Section ── */
+
     .section {
       margin-bottom: 28px;
     }
@@ -426,38 +401,38 @@
     /* ── Responsive: mobile < 768px ── */
     @media (max-width: 767px) {
       body {
-        padding-bottom: 100px;
+        padding-bottom: 86px;
       }
 
       .page {
-        padding: 20px 14px 12px;
-      }
-
-      .np-layout {
-        flex-direction: column;
-        text-align: center;
-        gap: 14px;
-      }
-
-      .cover {
-        width: 100px;
-        height: 100px;
-      }
-
-      .np-stats {
-        justify-content: center;
+        padding: 16px 12px 10px;
       }
 
       .player-bar {
-        border-radius: 0;
-        margin: 0;
-        border-left: none;
-        border-right: none;
-        border-bottom: none;
+        padding: 8px 12px;
+        gap: 8px;
+        min-height: 64px;
+      }
+
+      .player-cover {
+        width: 36px;
+        height: 36px;
+      }
+
+      .player-track {
+        font-size: 0.75rem;
+      }
+
+      .player-meta {
+        font-size: 0.68rem;
+      }
+
+      .player-stats {
+        display: none;
       }
 
       .volume-slider {
-        width: 60px;
+        width: 48px;
       }
 
       .station-info {
@@ -473,17 +448,6 @@
         width: 100%;
         margin-top: 4px;
       }
-
-      /* Fixed bottom player on mobile */
-      .sticky-player {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        z-index: 100;
-        border-top: 1px solid var(--border-strong);
-        border-radius: 0;
-      }
     }
   </style>
 </head>
@@ -493,64 +457,7 @@
   </audio>
 
   <div class="page">
-    <!-- Zone 1: Hero / Now Playing -->
-    <section class="np-hero" aria-label="Now Playing">
-      <div class="np-layout">
-        <img class="cover" src="{{ cover_url }}" alt="Album art" onerror="this.style.display='none'">
-        <div class="np-details">
-          <div class="np-eyebrow"><span class="live-dot"></span>On Air</div>
-          <h1 class="np-title" id="track-title">{{ current_track }}</h1>
-          <div class="np-meta">
-            <span id="track-artist"></span>
-            <span class="np-sep">/</span>
-            <span id="track-album">{{ album }}</span>
-          </div>
-          <div class="np-stats">
-            <span class="np-listeners">{{ listeners }} listening</span>
-            <span class="np-bitrate">{{ bitrate }} kbps</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Zone 2: Player Bar -->
-    <div class="player-bar" id="playerBar" role="region" aria-label="Audio player">
-      <button class="play-btn" id="playBtn" aria-label="Play" type="button">
-        <svg id="playIcon" viewBox="0 0 16 16"><path d="M5 3l9 5-9 5V3z"/></svg>
-        <svg id="pauseIcon" viewBox="0 0 16 16" style="display:none"><path d="M5 3h2v10H5V3zm4 0h2v10H9V3z"/></svg>
-      </button>
-      <div class="player-info">
-        <div class="player-track" id="playerTrack">{{ current_track }}</div>
-        <div class="player-stream-label" id="playerStreamLabel"></div>
-        <div class="audio-error" id="audioError">Unable to play stream. Check connection or try another format.</div>
-      </div>
-      <div class="volume-wrap">
-        <svg class="volume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 5L6 9H2v6h4l5 4V5z"/>
-          <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
-        </svg>
-        <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="80" aria-label="Volume">
-      </div>
-    </div>
-
-    <!-- Zone 3: Streams -->
-    <section class="section" aria-label="Streams">
-      <div class="section-title">Listen</div>
-      <div class="stream-list" id="streamList">
-        {% for stream in streams %}
-        <div class="stream-row" data-stream-name="{{ stream.name }}">
-          <span class="stream-chip" data-stream="{{ stream.name }}">
-            {{ stream.name }}<span class="stream-chip-kbps">/{{ stream.bitrate }}k</span>
-          </span>
-          <span class="stream-url">{{ stream.url }}</span>
-          <span class="stream-listeners">0 listening</span>
-          <button class="copy-btn" data-url="{{ stream.url }}">Copy</button>
-        </div>
-        {% endfor %}
-      </div>
-    </section>
-
-    <!-- Zone 4: Station Info -->
+    <!-- Zone 1: Station Info -->
     <section class="section" aria-label="Station Info">
       <div class="section-title">Station</div>
       <div class="station-info">
@@ -573,6 +480,23 @@
       </div>
     </section>
 
+    <!-- Zone 2: Streams -->
+    <section class="section" aria-label="Streams">
+      <div class="section-title">Listen</div>
+      <div class="stream-list" id="streamList">
+        {% for stream in streams %}
+        <div class="stream-row" data-stream-name="{{ stream.name }}">
+          <span class="stream-chip" data-stream="{{ stream.name }}">
+            {{ stream.name }}<span class="stream-chip-kbps">/{{ stream.bitrate }}k</span>
+          </span>
+          <span class="stream-url">{{ stream.url }}</span>
+          <span class="stream-listeners">0 listening</span>
+          <button class="copy-btn" data-url="{{ stream.url }}">Copy</button>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
     <!-- Footer -->
     <footer class="footer">
       <div class="footer-links">
@@ -582,6 +506,36 @@
       </div>
       <div class="footer-version">{{ version }}</div>
     </footer>
+  </div>
+
+  <!-- Zone 3: Player Bar (bottom, with now-playing info) -->
+  <div class="player-bar" id="playerBar" role="region" aria-label="Audio player">
+    <img class="player-cover" src="{{ cover_url }}" alt="" onerror="this.style.display='none'">
+    <div class="player-info">
+      <div class="player-eyebrow"><span class="live-dot"></span>On Air</div>
+      <div class="player-track" id="playerTrack">{{ current_track }}</div>
+      <div class="player-meta">
+        <span id="track-artist"></span>
+        <span class="np-sep">/</span>
+        <span id="track-album">{{ album }}</span>
+      </div>
+      <div class="player-stats">
+        <span class="np-listeners">{{ listeners }} listening</span>
+        <span class="np-bitrate">{{ bitrate }} kbps</span>
+      </div>
+      <div class="audio-error" id="audioError">Unable to play stream. Check connection or try another format.</div>
+    </div>
+    <button class="play-btn" id="playBtn" aria-label="Play" type="button">
+      <svg id="playIcon" viewBox="0 0 16 16"><path d="M5 3l9 5-9 5V3z"/></svg>
+      <svg id="pauseIcon" viewBox="0 0 16 16" style="display:none"><path d="M5 3h2v10H5V3zm4 0h2v10H9V3z"/></svg>
+    </button>
+    <div class="volume-wrap">
+      <svg class="volume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+        <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
+      </svg>
+      <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="80" aria-label="Volume">
+    </div>
   </div>
 
   <script>
@@ -594,10 +548,8 @@
     var playerTrack = document.getElementById('playerTrack');
     var playerStreamLabel = document.getElementById('playerStreamLabel');
     var audioError = document.getElementById('audioError');
-    var trackTitle = document.getElementById('track-title');
     var trackArtist = document.getElementById('track-artist');
     var trackAlbum = document.getElementById('track-album');
-    var playerBar = document.getElementById('playerBar');
     var streamList = document.getElementById('streamList');
 
     var playing = false;
@@ -738,17 +690,14 @@
           var album = data.album || '';
           var meta = parseMetadata(track);
 
-          if (trackTitle.textContent !== track) {
-            trackTitle.textContent = track;
-          }
           if (trackArtist.textContent !== meta.artist) {
             trackArtist.textContent = meta.artist;
           }
           if (trackAlbum.textContent !== album) {
             trackAlbum.textContent = album;
           }
-          if (playerTrack.textContent !== track) {
-            playerTrack.textContent = track;
+          if (playerTrack.textContent !== meta.title) {
+            playerTrack.textContent = meta.title;
           }
           document.title = (track || '{{ station_name }}') + ' / Funkstrom';
         })
@@ -783,20 +732,9 @@
       }
     });
 
-    // ── Mobile sticky player ──
-    function handleResponsive() {
-      if (window.innerWidth < 768) {
-        playerBar.classList.add('sticky-player');
-      } else {
-        playerBar.classList.remove('sticky-player');
-      }
-    }
-
-    window.addEventListener('resize', handleResponsive);
 
     // ── Init ──
     playerStreamLabel.textContent = currentStream;
-    handleResponsive();
     startPolling();
 
     // Mark first stream chip as active
