@@ -1131,3 +1131,89 @@ fn given_stream_url_when_processing_audio_then_metadata_block_contains_stream_ur
         content
     );
 }
+
+// --- render_info_page tests ---
+
+fn info_page_context_with_streams(streams: Vec<StreamLink>) -> InfoPageContext {
+    InfoPageContext {
+        station_name: "Funkstrom FM".to_string(),
+        current_track: "Artist - Track".to_string(),
+        album: "The Album".to_string(),
+        station_description: "A radio station".to_string(),
+        station_genre: "Electronic".to_string(),
+        bitrate: 320,
+        public_url: "https://radio.example.com".to_string(),
+        streams,
+        first_stream: "/stream".to_string(),
+        cover_url: "https://radio.example.com/cover.jpg".to_string(),
+        version: "1.2.3".to_string(),
+        listeners: 42,
+        uptime: "1h 2m".to_string(),
+    }
+}
+
+#[test]
+fn given_template_with_loop_when_two_streams_then_body_repeated_per_stream() {
+    let ctx = info_page_context_with_streams(vec![
+        StreamLink {
+            name: "lo".to_string(),
+            bitrate: 128,
+            url: "/low".to_string(),
+        },
+        StreamLink {
+            name: "hi".to_string(),
+            bitrate: 320,
+            url: "/high".to_string(),
+        },
+    ]);
+    let template = "A{% for stream in streams %}({{ stream.name }}|{{ stream.bitrate }}|{{ stream.url }}){% endfor %}B";
+
+    let rendered = render_info_page(&ctx, template);
+
+    assert_eq!(rendered, "A(lo|128|/low)(hi|320|/high)B");
+}
+
+#[test]
+fn given_template_with_loop_when_no_streams_then_loop_block_removed_entirely() {
+    let ctx = info_page_context_with_streams(Vec::new());
+    let template = "A{% for stream in streams %}({{ stream.name }}){% endfor %}B";
+
+    let rendered = render_info_page(&ctx, template);
+
+    assert_eq!(rendered, "AB");
+}
+
+#[test]
+fn given_stream_placeholders_in_loop_when_single_stream_then_all_substituted() {
+    let ctx = info_page_context_with_streams(vec![StreamLink {
+        name: "main".to_string(),
+        bitrate: 256,
+        url: "https://radio.example.com/main".to_string(),
+    }]);
+    let template =
+        "{% for stream in streams %}<a href=\"{{ stream.url }}\">{{ stream.name }} {{ stream.bitrate }}</a>{% endfor %}";
+
+    let rendered = render_info_page(&ctx, template);
+
+    assert_eq!(
+        rendered,
+        "<a href=\"https://radio.example.com/main\">main 256</a>"
+    );
+}
+
+#[test]
+fn given_scalar_placeholders_when_rendering_then_each_substituted_with_context_value() {
+    let ctx = info_page_context_with_streams(Vec::new());
+    let template =
+        "{{ station_name }}|{{ first_stream }}|{{ station_genre }}|{{ station_description }}\
+                    |{{ current_track }}|{{ album }}|{{ bitrate }}|{{ public_url }}|{{ cover_url }}\
+                    |{{ version }}|{{ listeners }}|{{ uptime }}";
+
+    let rendered = render_info_page(&ctx, template);
+
+    assert_eq!(
+        rendered,
+        "Funkstrom FM|/stream|Electronic|A radio station|Artist - Track|The Album|320|https://radio.example.com\
+         |https://radio.example.com/cover.jpg|1.2.3|42|1h 2m"
+    );
+}
