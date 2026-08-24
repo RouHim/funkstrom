@@ -163,15 +163,6 @@ impl FFmpegProcessor {
         Ok(())
     }
 
-    pub fn start_conversion_with_seek(
-        &self,
-        input: &str,
-        seek_offset_secs: Option<f64>,
-        metadata: Option<&TrackMetadata>,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion_internal(input, seek_offset_secs, metadata)
-    }
-
     fn build_ffmpeg_args(
         &self,
         input: &str,
@@ -377,7 +368,7 @@ impl FFmpegProcessor {
                     }
 
                     let track_str = track.to_string_lossy().to_string();
-                    let result = self.start_conversion_with_seek(
+                    let result = self.start_conversion_internal(
                         &track_str,
                         Some(current_snapshot.elapsed_in_track_secs),
                         Some(&current_snapshot.current_metadata),
