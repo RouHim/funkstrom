@@ -24,7 +24,7 @@ audiotags = "0.5"
 serde_json = "1.0"
 cron = "0.17.0"
 chrono = "0.4"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.31"
 ureq = { version = "3", features = ["json"] }
