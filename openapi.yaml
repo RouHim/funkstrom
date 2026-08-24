@@ -225,6 +225,18 @@ paths:
               schema:
                 type: string
                 format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+            image/tiff:
+              schema:
+                type: string
+                format: binary
+            image/bmp:
+              schema:
+                type: string
+                format: binary
         '204':
           description: No cover available (no track playing, or track has no embedded cover art)
 

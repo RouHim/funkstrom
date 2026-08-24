@@ -40,6 +40,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY openapi.yaml ./
 COPY favicon.ico ./
+COPY swagger-ui.css ./swagger-ui.css
+COPY swagger-ui-bundle.js ./swagger-ui-bundle.js
 COPY src/ src/
 COPY templates/ templates/
 
