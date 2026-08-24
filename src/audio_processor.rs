@@ -1,84 +1,33 @@
-use bytes::Bytes;
 #[cfg(test)]
 use crossbeam_channel::unbounded;
 use crossbeam_channel::Sender;
 use log::{debug, error, info, warn};
 use std::io::ErrorKind;
-use std::io::{BufReader, Read};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{watch, Notify};
 
 use crate::audio_metadata::TrackMetadata;
+pub(crate) use crate::ffmpeg_process::AudioChunk;
+use crate::ffmpeg_process::{
+    calculate_backoff_ms, is_url_input, resolve_ffmpeg_path, AudioProcess,
+};
+use crate::format::{get_codec_for_format, get_muxer_for_format};
 use crate::playback_director::TimelineSnapshot;
 
 // Constants for audio processing configuration
-const AUDIO_CHUNK_SIZE: usize = 8192; // 8KB chunks for reading audio data
 const PROCESS_POLL_INTERVAL_MS: u64 = 10; // How often to poll FFmpeg process
-const INITIAL_BACKOFF_MS: u64 = 1000;
-const MAX_BACKOFF_MS: u64 = 5_000;
 const IDLE_GRACE_PERIOD_SECS: u64 = 60;
 
-fn looks_like_filesystem_path(value: &str) -> bool {
-    value.starts_with('/') || value.contains('/')
-}
-
-fn resolve_ffmpeg_path(configured_path: Option<String>, env_ffmpeg_path: Option<String>) -> String {
-    let configured_path = configured_path
-        .map(|path| path.trim().to_string())
-        .filter(|path| !path.is_empty());
-
-    if let Some(path) = configured_path.as_ref() {
-        if !looks_like_filesystem_path(path) || Path::new(path).exists() {
-            return path.clone();
-        }
-        warn!(
-            "Configured FFmpeg path '{}' does not exist, trying fallbacks",
-            path
-        );
-    }
-
-    let env_ffmpeg_path = env_ffmpeg_path
-        .map(|path| path.trim().to_string())
-        .filter(|path| !path.is_empty());
-
-    if let Some(path) = env_ffmpeg_path {
-        if !looks_like_filesystem_path(&path) || Path::new(&path).exists() {
-            return path;
-        }
-        warn!(
-            "FFMPEG_PATH '{}' does not exist, trying built-in fallbacks",
-            path
-        );
-    }
-
-    let container_ffmpeg = "/ffmpeg";
-    if Path::new(container_ffmpeg).exists() {
-        return container_ffmpeg.to_string();
-    }
-
-    "ffmpeg".to_string()
-}
-
-fn calculate_backoff_ms(consecutive_failures: u32) -> u64 {
-    let backoff =
-        INITIAL_BACKOFF_MS.saturating_mul(1u64.wrapping_shl(consecutive_failures.min(15)));
-    backoff.min(MAX_BACKOFF_MS)
-}
-
-fn is_url_input(input: &str) -> bool {
-    input.starts_with("http://") || input.starts_with("https://")
-}
-
 pub struct FFmpegProcessor {
-    ffmpeg_path: String,
-    sample_rate: u32,
-    bitrate: u32,
-    channels: u8,
-    format: String,
+    pub(crate) ffmpeg_path: String,
+    pub(crate) sample_rate: u32,
+    pub(crate) bitrate: u32,
+    pub(crate) channels: u8,
+    pub(crate) format: String,
 }
 
 impl FFmpegProcessor {
@@ -98,34 +47,6 @@ impl FFmpegProcessor {
             bitrate,
             channels,
             format,
-        }
-    }
-
-    fn get_codec_for_format(&self, format: &str) -> &str {
-        match format {
-            "mp3" => "libmp3lame",
-            "opus" => "libopus",
-            "aac" => "aac",
-            "vorbis" | "ogg" => "libvorbis",
-            "flac" => "flac",
-            _ => {
-                warn!("Unknown format '{}', defaulting to libmp3lame", format);
-                "libmp3lame"
-            }
-        }
-    }
-
-    fn get_muxer_for_format(&self, format: &str) -> &str {
-        match format {
-            "aac" => "adts",
-            "mp3" => "mp3",
-            "opus" => "opus",
-            "vorbis" | "ogg" => "ogg",
-            "flac" => "flac",
-            _ => {
-                warn!("Unknown format '{}', defaulting to mp3 muxer", format);
-                "mp3"
-            }
         }
     }
 
@@ -163,23 +84,14 @@ impl FFmpegProcessor {
         Ok(())
     }
 
-    pub fn start_conversion_with_seek(
-        &self,
-        input: &str,
-        seek_offset_secs: Option<f64>,
-        metadata: Option<&TrackMetadata>,
-    ) -> Result<AudioProcess, Box<dyn std::error::Error + Send + Sync>> {
-        self.start_conversion_internal(input, seek_offset_secs, metadata)
-    }
-
     fn build_ffmpeg_args(
         &self,
         input: &str,
         seek_offset_secs: Option<f64>,
         metadata: Option<&TrackMetadata>,
     ) -> Vec<String> {
-        let codec = self.get_codec_for_format(&self.format);
-        let muxer = self.get_muxer_for_format(&self.format);
+        let codec = get_codec_for_format(&self.format);
+        let muxer = get_muxer_for_format(&self.format);
 
         let mut args = Vec::new();
 
@@ -377,7 +289,7 @@ impl FFmpegProcessor {
                     }
 
                     let track_str = track.to_string_lossy().to_string();
-                    let result = self.start_conversion_with_seek(
+                    let result = self.start_conversion_internal(
                         &track_str,
                         Some(current_snapshot.elapsed_in_track_secs),
                         Some(&current_snapshot.current_metadata),
@@ -488,95 +400,8 @@ impl FFmpegProcessor {
     }
 }
 
-pub struct AudioProcess {
-    child: Child,
-    reader: Option<BufReader<std::process::ChildStdout>>,
-    stderr: Option<BufReader<std::process::ChildStderr>>,
-}
-
-impl AudioProcess {
-    fn new(mut child: Child) -> Self {
-        let reader = child.stdout.take().map(BufReader::new);
-        let stderr = child.stderr.take().map(BufReader::new);
-        Self {
-            child,
-            reader,
-            stderr,
-        }
-    }
-
-    pub fn read_chunk(
-        &mut self,
-    ) -> Result<Option<Bytes>, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref mut reader) = self.reader {
-            let mut buffer = [0u8; AUDIO_CHUNK_SIZE];
-            match reader.read(&mut buffer) {
-                Ok(0) => {
-                    // EOF reached
-                    let success = self.wait_for_completion()?;
-                    if success {
-                        Ok(None)
-                    } else {
-                        Err("FFmpeg process exited with non-zero status".into())
-                    }
-                }
-                Ok(bytes_read) => Ok(Some(Bytes::copy_from_slice(&buffer[..bytes_read]))),
-                Err(e) => {
-                    error!("Error reading from FFmpeg stdout: {}", e);
-                    Err(e.into())
-                }
-            }
-        } else {
-            Err("No stdout reader available".into())
-        }
-    }
-
-    fn wait_for_completion(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-        let stderr_output = if let Some(ref mut stderr) = self.stderr {
-            let mut buf = Vec::with_capacity(4096);
-            let _ = stderr.by_ref().take(4096).read_to_end(&mut buf);
-            String::from_utf8_lossy(&buf).to_string()
-        } else {
-            String::new()
-        };
-
-        match self.child.wait() {
-            Ok(status) => {
-                if status.success() {
-                    debug!("FFmpeg process completed successfully");
-                    Ok(true)
-                } else {
-                    warn!(
-                        "FFmpeg process exited with status: {} - stderr: {}",
-                        status,
-                        stderr_output.trim()
-                    );
-                    Ok(false)
-                }
-            }
-            Err(e) => {
-                error!("Error waiting for FFmpeg process: {}", e);
-                Err(e.into())
-            }
-        }
-    }
-
-    fn terminate(mut self) {
-        if let Err(e) = self.child.kill() {
-            debug!("Unable to kill FFmpeg process cleanly: {}", e);
-        }
-        if let Err(e) = self.child.wait() {
-            debug!("Unable to wait for killed FFmpeg process: {}", e);
-        }
-    }
-}
-#[derive(Debug, Clone)]
-pub struct AudioChunk {
-    pub data: Bytes,
-}
-
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::audio_metadata::TrackMetadata;
     use std::path::Path;
@@ -597,7 +422,7 @@ mod tests {
         }
     }
 
-    fn create_fake_ffmpeg_script(script_body: &str) -> (tempfile::TempDir, String) {
+    pub(crate) fn create_fake_ffmpeg_script(script_body: &str) -> (tempfile::TempDir, String) {
         use std::fs;
         use std::os::unix::fs::PermissionsExt;
         let dir = tempdir().expect("temporary directory should be created");
@@ -611,126 +436,6 @@ mod tests {
             .expect("fake ffmpeg script should be marked executable");
         let script_path = path.to_string_lossy().to_string();
         (dir, script_path)
-    }
-
-    #[test]
-    fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        assert_eq!(processor.get_codec_for_format("mp3"), "libmp3lame");
-    }
-
-    #[test]
-    fn given_opus_format_when_getting_codec_then_returns_libopus() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "opus".to_string());
-        assert_eq!(processor.get_codec_for_format("opus"), "libopus");
-    }
-
-    #[test]
-    fn given_aac_format_when_getting_codec_then_returns_aac() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
-        assert_eq!(processor.get_codec_for_format("aac"), "aac");
-    }
-
-    #[test]
-    fn given_vorbis_format_when_getting_codec_then_returns_libvorbis() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "vorbis".to_string());
-        assert_eq!(processor.get_codec_for_format("vorbis"), "libvorbis");
-    }
-
-    #[test]
-    fn given_ogg_format_when_getting_codec_then_returns_libvorbis() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
-        assert_eq!(processor.get_codec_for_format("ogg"), "libvorbis");
-    }
-
-    #[test]
-    fn given_flac_format_when_getting_codec_then_returns_flac() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
-        assert_eq!(processor.get_codec_for_format("flac"), "flac");
-    }
-
-    #[test]
-    fn given_unknown_format_when_getting_codec_then_returns_default_libmp3lame() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
-        assert_eq!(processor.get_codec_for_format("unknown"), "libmp3lame");
-    }
-
-    #[test]
-    fn given_aac_format_when_getting_muxer_then_returns_adts() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
-        assert_eq!(processor.get_muxer_for_format("aac"), "adts");
-    }
-
-    #[test]
-    fn given_mp3_format_when_getting_muxer_then_returns_mp3() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        assert_eq!(processor.get_muxer_for_format("mp3"), "mp3");
-    }
-
-    #[test]
-    fn given_opus_format_when_getting_muxer_then_returns_opus() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "opus".to_string());
-        assert_eq!(processor.get_muxer_for_format("opus"), "opus");
-    }
-
-    #[test]
-    fn given_vorbis_format_when_getting_muxer_then_returns_ogg() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "vorbis".to_string());
-        assert_eq!(processor.get_muxer_for_format("vorbis"), "ogg");
-    }
-
-    #[test]
-    fn given_ogg_format_when_getting_muxer_then_returns_ogg() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
-        assert_eq!(processor.get_muxer_for_format("ogg"), "ogg");
-    }
-
-    #[test]
-    fn given_flac_format_when_getting_muxer_then_returns_flac() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
-        assert_eq!(processor.get_muxer_for_format("flac"), "flac");
-    }
-
-    #[test]
-    fn given_unknown_format_when_getting_muxer_then_returns_default_mp3() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
-        assert_eq!(processor.get_muxer_for_format("unknown"), "mp3");
-    }
-    #[test]
-    fn given_zero_failures_when_calculating_backoff_then_returns_initial_backoff_ms() {
-        assert_eq!(calculate_backoff_ms(0), 1000);
-    }
-
-    #[test]
-    fn given_one_failure_when_calculating_backoff_then_returns_doubled_initial_backoff_ms() {
-        assert_eq!(calculate_backoff_ms(1), 2000);
-    }
-
-    #[test]
-    fn given_many_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
-        assert_eq!(calculate_backoff_ms(100), 5_000);
-    }
-
-    #[test]
-    fn given_max_u32_failures_when_calculating_backoff_then_returns_max_backoff_ms() {
-        assert_eq!(calculate_backoff_ms(u32::MAX), 5_000);
-    }
-
-    #[test]
-    fn given_missing_config_path_when_resolving_then_uses_env_command_name() {
-        let resolved = resolve_ffmpeg_path(None, Some("ffmpeg-custom".to_string()));
-        assert_eq!(resolved, "ffmpeg-custom");
-    }
-
-    #[test]
-    fn given_missing_config_and_env_when_resolving_then_uses_command_name_fallback() {
-        let resolved = resolve_ffmpeg_path(None, None);
-        let expected = if PathBuf::from("/ffmpeg").exists() {
-            "/ffmpeg"
-        } else {
-            "ffmpeg"
-        };
-        assert_eq!(resolved, expected);
     }
 
     #[test]
@@ -1098,64 +803,5 @@ exit 0
             !is_paused.load(Ordering::SeqCst),
             "is_paused should stay false before grace period expires"
         );
-    }
-
-    #[test]
-    fn given_absolute_path_when_checking_looks_like_filesystem_path_then_returns_true() {
-        assert!(looks_like_filesystem_path("/usr/bin/ffmpeg"));
-    }
-
-    #[test]
-    fn given_relative_path_when_checking_looks_like_filesystem_path_then_returns_true() {
-        assert!(looks_like_filesystem_path("./ffmpeg"));
-        assert!(looks_like_filesystem_path("bin/ffmpeg"));
-    }
-
-    #[test]
-    fn given_windows_style_path_with_forward_slash_when_checking_looks_like_filesystem_path_then_returns_true(
-    ) {
-        assert!(looks_like_filesystem_path("C:/tools/ffmpeg.exe"));
-    }
-
-    #[test]
-    fn given_url_string_when_checking_looks_like_filesystem_path_then_returns_true() {
-        assert!(
-            looks_like_filesystem_path("http://example.com/stream.mp3"),
-            "current implementation matches on any '/' so URLs also count as filesystem paths"
-        );
-    }
-
-    #[test]
-    fn given_plain_word_when_checking_looks_like_filesystem_path_then_returns_false() {
-        assert!(!looks_like_filesystem_path("ffmpeg"));
-    }
-
-    #[test]
-    fn given_bare_executable_name_with_extension_when_checking_looks_like_filesystem_path_then_returns_false(
-    ) {
-        assert!(!looks_like_filesystem_path("ffmpeg.exe"));
-    }
-
-    #[test]
-    fn given_backslash_only_path_when_checking_looks_like_filesystem_path_then_returns_false() {
-        assert!(!looks_like_filesystem_path(r"C:\tools\ffmpeg.exe"));
-    }
-
-    #[test]
-    fn given_empty_string_when_checking_looks_like_filesystem_path_then_returns_false() {
-        assert!(!looks_like_filesystem_path(""));
-    }
-
-    #[test]
-    fn given_http_and_https_inputs_when_pinning_is_url_input_edge_cases_then_matches_current_truth_table(
-    ) {
-        assert!(is_url_input("https://example.com/stream.mp3"));
-        assert!(!is_url_input(""));
-        // Case-sensitive prefix check: uppercase scheme is not detected
-        assert!(!is_url_input("HTTP://example.com/stream.mp3"));
-        assert!(!is_url_input("HTTPS://example.com/stream.mp3"));
-        // Only http(s) schemes count; other URL schemes fall through
-        assert!(!is_url_input("ftp://example.com/stream.mp3"));
-        assert!(!is_url_input("file:///tmp/song.mp3"));
     }
 }
