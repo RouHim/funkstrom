@@ -155,26 +155,7 @@ impl LibraryDatabase {
     }
 
     pub fn update_track(&self, track: &TrackRecord) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let conn = self.pool.get()?;
-
-        conn.execute(
-            "UPDATE tracks SET title = ?1, artist = ?2, album = ?3, duration_seconds = ?4,
-                file_size = ?5, last_modified = ?6, file_extension = ?7, updated_at = ?8
-             WHERE file_path = ?9",
-            params![
-                track.title,
-                track.artist,
-                track.album,
-                track.duration_seconds,
-                track.file_size,
-                track.last_modified,
-                track.file_extension,
-                track.updated_at,
-                track.file_path,
-            ],
-        )?;
-
-        Ok(())
+        self.update_tracks_batch(std::slice::from_ref(track))
     }
 
     pub fn update_tracks_batch(
@@ -211,12 +192,7 @@ impl LibraryDatabase {
     }
 
     pub fn delete_track(&self, file_path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let conn = self.pool.get()?;
-        conn.execute(
-            "DELETE FROM tracks WHERE file_path = ?1",
-            params![file_path],
-        )?;
-        Ok(())
+        self.delete_tracks_batch(std::slice::from_ref(&file_path.to_string()))
     }
 
     pub fn delete_tracks_batch(
