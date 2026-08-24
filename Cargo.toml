@@ -26,7 +26,7 @@ cron = "0.17.0"
 chrono = "0.4"
 rusqlite = { version = "0.37", features = ["bundled"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.31"
+r2d2_sqlite = "0.35"
 ureq = { version = "3", features = ["json"] }
 fastrand = "2"
 futures-core = "0.3"
