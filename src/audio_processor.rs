@@ -22,6 +22,10 @@ const INITIAL_BACKOFF_MS: u64 = 1000;
 const MAX_BACKOFF_MS: u64 = 5_000;
 const IDLE_GRACE_PERIOD_SECS: u64 = 60;
 
+/// Heuristic only: returns true for any value containing '/'. This means URLs
+/// (e.g. "https://host/x") also match; callers must not treat this as a strict
+/// filesystem-path check. resolve_ffmpeg_path's fallback logic depends on this
+/// exact truth table — do not tighten the predicate without updating it.
 fn looks_like_filesystem_path(value: &str) -> bool {
     value.starts_with('/') || value.contains('/')
 }
@@ -101,6 +105,9 @@ impl FFmpegProcessor {
         }
     }
 
+    // Config validation (config.rs StreamConfig::validate) only accepts mp3/aac/opus/ogg.
+    // The vorbis and flac arms below are defensive for direct/internal callers and are
+    // intentionally kept in sync with get_muxer_for_format.
     fn get_codec_for_format(&self, format: &str) -> &str {
         match format {
             "mp3" => "libmp3lame",
