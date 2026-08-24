@@ -212,7 +212,7 @@ impl<T> Stream for UnboundedReceiverStream<T> {
     }
 }
 
-/// Render the info page HTML from a minijinja-style template using simple string replacement.
+/// Render the info page HTML by substituting placeholders in the template via string replacement.
 fn render_info_page(ctx: &InfoPageContext, template: &str) -> String {
     let mut html = template.to_owned();
 
