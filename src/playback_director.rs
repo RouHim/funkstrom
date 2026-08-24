@@ -279,7 +279,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn given_no_listeners_when_tick_then_encoding_always_active() {
+    async fn given_tick_within_track_when_director_ticks_then_snapshot_published() {
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
         let mut snapshot_rx = director.snapshot_tx.subscribe();
 
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn given_listeners_disconnect_when_tick_then_encoding_stays_active() {
+    async fn given_tick_within_track_duration_then_snapshot_unchanged() {
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
 
         director.tick();

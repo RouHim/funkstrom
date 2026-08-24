@@ -813,8 +813,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn given_snapshot_without_encoding_active_flag_when_processing_then_ffmpeg_decision_not_gated(
-    ) {
+    async fn given_timeline_snapshot_when_processing_then_ffmpeg_streams_chunks() {
         let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
             r#"#!/bin/sh
 printf 'audio'
@@ -847,7 +846,7 @@ exit 0
 
         assert!(
             recv_result.is_ok(),
-            "expected FFmpeg spawn/streaming decision to be independent from is_encoding_active"
+            "expected timeline processing to stream audio chunks"
         );
     }
 
@@ -909,7 +908,7 @@ exit 1
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn given_is_encoding_active_false_when_processing_then_is_paused_never_true() {
+    async fn given_no_listeners_when_processing_then_is_paused_stays_false() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
         let (timeline_tx, timeline_rx) =
             watch::channel(snapshot_with("https://example.com/stream", 0));
@@ -931,7 +930,7 @@ exit 1
 
         assert!(
             !is_paused.load(Ordering::SeqCst),
-            "expected audio processor to never enter paused state based on is_encoding_active"
+            "expected is_paused to stay false when no listeners are connected"
         );
     }
 
