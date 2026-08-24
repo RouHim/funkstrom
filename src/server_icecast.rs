@@ -142,6 +142,9 @@ fn extract_cover_from_file(path: &std::path::Path) -> Option<(Vec<u8>, String)> 
     let mime: &'static str = cover.mime_type.into();
     Some((cover.data.to_vec(), mime.to_string()))
 }
+fn split_hms(total_secs: u64) -> (u64, u64, u64) {
+    ((total_secs / 3600), (total_secs % 3600) / 60, total_secs % 60)
+}
 fn build_icy_metadata_block(artist_title: &str, stream_url: Option<&str>) -> Vec<u8> {
     let stream_url = stream_url.unwrap_or("");
     let stream_title = format!("StreamTitle='{}';StreamUrl='{}';", artist_title, stream_url);
@@ -605,10 +608,7 @@ impl IcecastServer {
             station_genre: self.station_genre.clone(),
             streams,
             uptime: {
-                let elapsed = self.start_time.elapsed().as_secs();
-                let h = elapsed / 3600;
-                let m = (elapsed % 3600) / 60;
-                let s = elapsed % 60;
+                let (h, m, s) = split_hms(self.start_time.elapsed().as_secs());
                 format!("{}h {}m {}s", h, m, s)
             },
             version: VERSION.to_string(),
@@ -700,8 +700,8 @@ impl IcecastServer {
             .sum();
 
         let uptime = {
-            let elapsed = self.start_time.elapsed().as_secs();
-            format!("{}h {}m", elapsed / 3600, (elapsed % 3600) / 60)
+            let (h, m, _) = split_hms(self.start_time.elapsed().as_secs());
+            format!("{}h {}m", h, m)
         };
 
         let context = InfoPageContext {
