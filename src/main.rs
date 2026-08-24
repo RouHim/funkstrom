@@ -4,6 +4,7 @@ mod audio_reader;
 mod cli;
 mod config;
 mod fanout_buffer;
+mod ffmpeg_process;
 mod hearthis_client;
 mod icy;
 mod library_db;
