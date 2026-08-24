@@ -453,6 +453,7 @@ impl IcecastServer {
         let cover_url = context.cover_url.clone();
         let do_icy_metadata_clone = do_icy_metadata;
 
+        const METADATA_INTERVAL: usize = 16000;
         tokio::spawn(async move {
             let _guard = ListenerGuard::new(listeners, notify);
             let mut cursor = match buffer.write() {
@@ -465,7 +466,6 @@ impl IcecastServer {
             let mut last_data_time = Instant::now();
             let timeout_duration = Duration::from_secs(30);
 
-            const METADATA_INTERVAL: usize = 16000;
             // byte counters start at 0 from first audio byte; no initial metadata block
             // (VLC, GStreamer icydemux count from HTTP body start — a leading block
             //  would be treated as audio, permanently misaligning all metadata boundaries)
@@ -542,7 +542,8 @@ impl IcecastServer {
             .header("Server", &server_version);
 
         if do_icy_metadata {
-            response_builder = response_builder.header("icy-metaint", "16000");
+            response_builder =
+                response_builder.header("icy-metaint", format!("{}", METADATA_INTERVAL));
         }
 
         let response = response_builder
