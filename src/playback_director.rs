@@ -288,7 +288,7 @@ mod tests {
 
         director.tick();
 
-        let _ = timeout(Duration::from_millis(200), snapshot_rx.changed())
+        timeout(Duration::from_millis(200), snapshot_rx.changed())
             .await
             .expect("expected tick to publish snapshot")
             .expect("expected watch receiver to stay open");
@@ -324,7 +324,7 @@ mod tests {
 
         director.tick();
 
-        let _ = timeout(Duration::from_millis(200), snapshot_rx.changed())
+        timeout(Duration::from_millis(200), snapshot_rx.changed())
             .await
             .expect("expected tick to publish advanced track snapshot")
             .expect("expected watch receiver to stay open");
