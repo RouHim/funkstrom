@@ -1,3 +1,15 @@
+# [1.6.0](https://github.com/RouHim/funkstrom/compare/1.5.6...1.6.0) (2026-08-24)
+
+
+### Bug Fixes
+
+* address code-review findings for Swagger vendoring ([26eeb3b](https://github.com/RouHim/funkstrom/commit/26eeb3b36309ec88b0a363cee8538bbcf52f87e9))
+
+
+### Features
+
+* embed Swagger UI assets offline, document /cover.jpg in OpenAPI spec ([071034f](https://github.com/RouHim/funkstrom/commit/071034f9aac21d6dcd766dfad35da5bf061fe525))
+
 ## [1.5.6](https://github.com/RouHim/funkstrom/compare/1.5.5...1.5.6) (2026-08-24)
 
 
