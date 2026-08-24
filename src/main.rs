@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod fanout_buffer;
 mod hearthis_client;
+mod icy;
 mod library_db;
 mod library_scanner;
 mod m3u_parser;
