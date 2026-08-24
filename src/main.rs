@@ -472,3 +472,117 @@ fn log_server_urls(config: &Config) {
         log::info!("Info URL: {}:{}/", base_url, port);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Timelike};
+
+    /// Builds an unambiguous fixed local datetime so tests never depend on
+    /// the real system clock.
+    fn fixed_local_datetime(
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        min: u32,
+        sec: u32,
+    ) -> chrono::DateTime<chrono::Local> {
+        chrono::Local
+            .with_ymd_and_hms(year, month, day, hour, min, sec)
+            .single()
+            .expect("test datetime must resolve to exactly one instant in the local timezone")
+    }
+
+    #[test]
+    fn given_morning_time_when_calculating_next_scan_duration_then_targets_next_calendar_day_3am() {
+        // 10:30 is long past today's 3AM; current behavior always targets
+        // TOMORROW's date at 03:00:00 local, never same-day.
+        let now = fixed_local_datetime(2024, 6, 15, 10, 30, 0);
+
+        let duration = calculate_next_scan_duration(&now).expect("duration calculation succeeds");
+
+        let wake_up = now + chrono::Duration::from_std(duration).unwrap();
+        assert_eq!(wake_up.hour(), 3);
+        assert_eq!(wake_up.minute(), 0);
+        assert_eq!(wake_up.second(), 0);
+        assert_eq!(
+            wake_up.date_naive(),
+            now.date_naive().succ_opt().unwrap(),
+            "must land on tomorrow's calendar date, not today's"
+        );
+        // Independent expectation computed with the same wall-clock logic.
+        let expected_target = fixed_local_datetime(2024, 6, 16, 3, 0, 0);
+        assert_eq!(
+            duration,
+            (expected_target - now).to_std().unwrap(),
+            "duration must equal the exact offset to next day 03:00:00 local"
+        );
+    }
+
+    #[test]
+    fn given_after_midnight_time_when_calculating_next_scan_duration_then_targets_following_day_3am(
+    ) {
+        // 00:30 is before 3AM, yet current behavior skips ahead to the NEXT
+        // calendar day's 3AM (~26.5h away), not the upcoming same-night 3AM.
+        let now = fixed_local_datetime(2024, 1, 15, 0, 30, 0);
+
+        let duration = calculate_next_scan_duration(&now).expect("duration calculation succeeds");
+
+        assert!(
+            duration >= std::time::Duration::from_secs(24 * 3600),
+            "after midnight the wait exceeds a full day because the target is the following day's 3AM, got {:?}",
+            duration
+        );
+        let wake_up = now + chrono::Duration::from_std(duration).unwrap();
+        assert_eq!(wake_up.hour(), 3);
+        assert_eq!(wake_up.minute(), 0);
+        assert_eq!(wake_up.second(), 0);
+        assert_eq!(wake_up.date_naive(), now.date_naive().succ_opt().unwrap());
+        let expected_target = fixed_local_datetime(2024, 1, 16, 3, 0, 0);
+        assert_eq!(duration, (expected_target - now).to_std().unwrap());
+    }
+
+    #[test]
+    fn given_exactly_3am_when_calculating_next_scan_duration_then_returns_full_day_to_next_3am() {
+        // At exactly 03:00:00 the next scan is the following day's 3AM;
+        // mid-January avoids DST transitions so this is exactly 24h.
+        let now = fixed_local_datetime(2024, 1, 15, 3, 0, 0);
+
+        let duration = calculate_next_scan_duration(&now).expect("duration calculation succeeds");
+
+        let wake_up = now + chrono::Duration::from_std(duration).unwrap();
+        assert_eq!(wake_up.hour(), 3);
+        assert_eq!(wake_up.minute(), 0);
+        assert_eq!(wake_up.second(), 0);
+        assert_eq!(wake_up.date_naive(), now.date_naive().succ_opt().unwrap());
+        // Tolerates DST-shifted timezones while pinning ~24h at the boundary.
+        assert!(
+            duration >= std::time::Duration::from_secs(23 * 3600)
+                && duration <= std::time::Duration::from_secs(25 * 3600),
+            "expected roughly one full day until the next 3AM, got {:?}",
+            duration
+        );
+    }
+
+    #[test]
+    fn given_late_evening_time_when_calculating_next_scan_duration_then_targets_immediately_following_day_3am(
+    ) {
+        // 23:59:59 is one second before midnight; the scan fires ~3h later
+        // at the very start of the next calendar day.
+        let now = fixed_local_datetime(2024, 6, 15, 23, 59, 59);
+
+        let duration = calculate_next_scan_duration(&now).expect("duration calculation succeeds");
+
+        let wake_up = now + chrono::Duration::from_std(duration).unwrap();
+        assert_eq!(wake_up.hour(), 3);
+        assert_eq!(wake_up.minute(), 0);
+        assert_eq!(wake_up.second(), 0);
+        assert_eq!(wake_up.date_naive(), now.date_naive().succ_opt().unwrap());
+        assert!(
+            duration <= std::time::Duration::from_secs(5 * 3600),
+            "late evening should be only a few hours from the next 3AM, got {:?}",
+            duration
+        );
+    }
+}
