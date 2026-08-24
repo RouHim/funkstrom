@@ -1134,6 +1134,7 @@ fn given_stream_url_when_processing_audio_then_metadata_block_contains_stream_ur
 
 // --- render_info_page tests ---
 
+#[cfg(test)]
 fn info_page_context_with_streams(streams: Vec<StreamLink>) -> InfoPageContext {
     InfoPageContext {
         station_name: "Funkstrom FM".to_string(),
