@@ -1,3 +1,10 @@
+## [1.5.6](https://github.com/RouHim/funkstrom/compare/1.5.5...1.5.6) (2026-08-24)
+
+
+### Bug Fixes
+
+* gate info_page_context_with_streams test helper behind cfg(test) ([e354135](https://github.com/RouHim/funkstrom/commit/e35413597d13dad364f5f2a30119ac2872278c44))
+
 ## [1.5.5](https://github.com/RouHim/funkstrom/compare/1.5.4...1.5.5) (2026-08-18)
 
 ## [1.5.4](https://github.com/RouHim/funkstrom/compare/1.5.3...1.5.4) (2026-08-16)
