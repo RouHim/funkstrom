@@ -1149,4 +1149,213 @@ exit 0
         assert!(!is_url_input("ftp://example.com/stream.mp3"));
         assert!(!is_url_input("file:///tmp/song.mp3"));
     }
+
+    // --- AudioProcess::read_chunk / wait_for_completion tests ---
+
+    /// Linux can transiently fail `execve` with `ETXTBSY` when many tests spawn
+    /// freshly written scripts concurrently; retry briefly before giving up.
+    fn retry_while_text_file_busy<T, E: std::fmt::Display>(
+        mut attempt: impl FnMut() -> Result<T, E>,
+    ) -> Result<T, E> {
+        const MAX_ATTEMPTS: usize = 100;
+        let mut last_err: Option<E> = None;
+        for _ in 0..MAX_ATTEMPTS {
+            match attempt() {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    if !err.to_string().contains("Text file busy") {
+                        return Err(err);
+                    }
+                    last_err = Some(err);
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+        panic!(
+            "script still busy after {MAX_ATTEMPTS} attempts; last error: {}",
+            last_err.expect("a busy error must have been recorded")
+        );
+    }
+
+    fn spawn_audio_process_from_script(script_path: &str) -> AudioProcess {
+        let mut cmd = Command::new(script_path);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = retry_while_text_file_busy(|| cmd.spawn().map_err(Box::<std::io::Error>::new))
+            .expect("fake ffmpeg process should spawn");
+        AudioProcess::new(child)
+    }
+
+    #[test]
+    fn given_audio_output_and_success_exit_when_reading_chunks_then_returns_bytes_before_eof_none()
+    {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+printf 'hello-audio'
+exit 0
+"#,
+        );
+        let mut process = spawn_audio_process_from_script(&fake_ffmpeg_path);
+
+        let first = process.read_chunk().expect("first read should succeed");
+        let chunk = first.expect("expected buffered audio bytes before EOF");
+        assert_eq!(&chunk[..], b"hello-audio");
+
+        let eof = process.read_chunk().expect("EOF read should not error");
+        assert!(
+            eof.is_none(),
+            "expected None once the successful child reaches EOF"
+        );
+    }
+
+    #[test]
+    fn given_silent_success_exit_when_reading_chunk_then_returns_eof_none() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+exit 0
+"#,
+        );
+        let mut process = spawn_audio_process_from_script(&fake_ffmpeg_path);
+
+        let result = process.read_chunk().expect("EOF read should not error");
+        assert!(result.is_none(), "immediate EOF with exit 0 yields None");
+    }
+
+    #[test]
+    fn given_buffered_audio_with_nonzero_exit_when_reading_to_eof_then_yields_bytes_then_errors() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+printf 'partial'
+exit 3
+"#,
+        );
+        let mut process = spawn_audio_process_from_script(&fake_ffmpeg_path);
+
+        // Current behavior: buffered data is handed out before the failure surfaces.
+        let chunk = process
+            .read_chunk()
+            .expect("buffered bytes are returned even though the child will fail");
+        assert_eq!(&chunk.expect("expected buffered bytes")[..], b"partial");
+
+        let err = process
+            .read_chunk()
+            .expect_err("EOF after non-zero exit must surface as an error")
+            .to_string();
+        assert!(
+            err.contains("non-zero status"),
+            "expected non-zero-status error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn given_immediate_nonzero_exit_when_reading_chunk_then_errors_on_nonzero_status() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+echo 'boom' >&2
+exit 1
+"#,
+        );
+        let mut process = spawn_audio_process_from_script(&fake_ffmpeg_path);
+
+        let err = process
+            .read_chunk()
+            .expect_err("EOF after non-zero exit must surface as an error")
+            .to_string();
+        assert!(
+            err.contains("non-zero status"),
+            "expected non-zero-status error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn given_zero_exit_when_waiting_for_completion_then_returns_ok_true() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+exit 0
+"#,
+        );
+        let mut process = spawn_audio_process_from_script(&fake_ffmpeg_path);
+
+        let completed = process
+            .wait_for_completion()
+            .expect("wait should never error on a clean child");
+        assert!(completed, "zero exit status should report success");
+    }
+
+    #[test]
+    fn given_nonzero_exit_when_waiting_for_completion_then_returns_ok_false() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+exit 9
+"#,
+        );
+        let mut process = spawn_audio_process_from_script(&fake_ffmpeg_path);
+
+        let completed = process
+            .wait_for_completion()
+            .expect("wait should report failure as Ok(false), not Err");
+        assert!(!completed, "non-zero exit status should report failure");
+    }
+
+    // --- FFmpegProcessor::check_ffmpeg_available tests ---
+
+    #[test]
+    fn given_version_printing_script_when_checking_availability_then_returns_ok() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+echo 'ffmpeg version 7.0-fake'
+exit 0
+"#,
+        );
+        let processor =
+            FFmpegProcessor::new(Some(fake_ffmpeg_path), 48000, 192, 2, "mp3".to_string());
+
+        retry_while_text_file_busy(|| processor.check_ffmpeg_available())
+            .expect("a zero-exit '-version' run should validate as available");
+    }
+
+    #[test]
+    fn given_missing_ffmpeg_executable_when_checking_availability_then_reports_not_found() {
+        // Constructed directly so resolve_ffmpeg_path cannot fall back to another binary.
+        let processor = FFmpegProcessor {
+            ffmpeg_path: "/nonexistent/funkstrom-missing-ffmpeg".to_string(),
+            sample_rate: 48000,
+            bitrate: 192,
+            channels: 2,
+            format: "mp3".to_string(),
+        };
+
+        let err = processor
+            .check_ffmpeg_available()
+            .expect_err("a missing executable must be reported");
+        assert!(
+            err.to_string().contains("was not found"),
+            "expected not-found message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn given_failing_version_script_when_checking_availability_then_reports_not_found_at_path() {
+        let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
+            r#"#!/bin/sh
+exit 2
+"#,
+        );
+        let processor = FFmpegProcessor::new(
+            Some(fake_ffmpeg_path.clone()),
+            48000,
+            192,
+            2,
+            "mp3".to_string(),
+        );
+
+        let err = retry_while_text_file_busy(|| processor.check_ffmpeg_available())
+            .expect_err("a failing '-version' run must be reported");
+        assert!(
+            err.to_string()
+                .contains(&format!("FFmpeg not found at path: {fake_ffmpeg_path}")),
+            "expected path-specific failure message, got: {err}"
+        );
+    }
 }
