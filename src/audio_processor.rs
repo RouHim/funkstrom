@@ -1100,4 +1100,63 @@ exit 0
             "is_paused should stay false before grace period expires"
         );
     }
+
+    #[test]
+    fn given_absolute_path_when_checking_looks_like_filesystem_path_then_returns_true() {
+        assert!(looks_like_filesystem_path("/usr/bin/ffmpeg"));
+    }
+
+    #[test]
+    fn given_relative_path_when_checking_looks_like_filesystem_path_then_returns_true() {
+        assert!(looks_like_filesystem_path("./ffmpeg"));
+        assert!(looks_like_filesystem_path("bin/ffmpeg"));
+    }
+
+    #[test]
+    fn given_windows_style_path_with_forward_slash_when_checking_looks_like_filesystem_path_then_returns_true(
+    ) {
+        assert!(looks_like_filesystem_path("C:/tools/ffmpeg.exe"));
+    }
+
+    #[test]
+    fn given_url_string_when_checking_looks_like_filesystem_path_then_returns_true() {
+        assert!(
+            looks_like_filesystem_path("http://example.com/stream.mp3"),
+            "current implementation matches on any '/' so URLs also count as filesystem paths"
+        );
+    }
+
+    #[test]
+    fn given_plain_word_when_checking_looks_like_filesystem_path_then_returns_false() {
+        assert!(!looks_like_filesystem_path("ffmpeg"));
+    }
+
+    #[test]
+    fn given_bare_executable_name_with_extension_when_checking_looks_like_filesystem_path_then_returns_false(
+    ) {
+        assert!(!looks_like_filesystem_path("ffmpeg.exe"));
+    }
+
+    #[test]
+    fn given_backslash_only_path_when_checking_looks_like_filesystem_path_then_returns_false() {
+        assert!(!looks_like_filesystem_path(r"C:\tools\ffmpeg.exe"));
+    }
+
+    #[test]
+    fn given_empty_string_when_checking_looks_like_filesystem_path_then_returns_false() {
+        assert!(!looks_like_filesystem_path(""));
+    }
+
+    #[test]
+    fn given_http_and_https_inputs_when_pinning_is_url_input_edge_cases_then_matches_current_truth_table(
+    ) {
+        assert!(is_url_input("https://example.com/stream.mp3"));
+        assert!(!is_url_input(""));
+        // Case-sensitive prefix check: uppercase scheme is not detected
+        assert!(!is_url_input("HTTP://example.com/stream.mp3"));
+        assert!(!is_url_input("HTTPS://example.com/stream.mp3"));
+        // Only http(s) schemes count; other URL schemes fall through
+        assert!(!is_url_input("ftp://example.com/stream.mp3"));
+        assert!(!is_url_input("file:///tmp/song.mp3"));
+    }
 }
