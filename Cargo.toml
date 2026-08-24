@@ -12,7 +12,7 @@ categories = ["multimedia::audio", "network-programming"]
 mimalloc = "0.1.48"
 
 [dependencies]
-warp = "0.3"
+warp = "0.4"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 toml = "1.0"
