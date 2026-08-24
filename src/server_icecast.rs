@@ -7,7 +7,7 @@ use futures_core::Stream;
 use serde::Serialize;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -196,19 +196,20 @@ fn process_audio_with_icy(
 
 /// Inline replacement for `tokio_stream::wrappers::UnboundedReceiverStream`.
 struct UnboundedReceiverStream<T> {
-    rx: UnboundedReceiver<T>,
+    rx: Mutex<UnboundedReceiver<T>>,
 }
 
 impl<T> UnboundedReceiverStream<T> {
     fn new(rx: UnboundedReceiver<T>) -> Self {
-        Self { rx }
+        Self { rx: Mutex::new(rx) }
     }
 }
 
 impl<T> Stream for UnboundedReceiverStream<T> {
     type Item = T;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        self.get_mut().rx.poll_recv(cx)
+        let mut rx = self.get_mut().rx.lock().expect("receiver mutex poisoned");
+        rx.poll_recv(cx)
     }
 }
 
@@ -346,7 +347,7 @@ impl IcecastServer {
                 }
             });
 
-        let status_route = warp::path("status").and(warp::get()).and_then({
+        let status_route = warp::path("status".to_owned()).and(warp::get()).and_then({
             let server = Arc::clone(&server);
             move || {
                 let server = Arc::clone(&server);
@@ -362,12 +363,14 @@ impl IcecastServer {
             }
         });
 
-        let favicon_bytes: &'static [u8] = include_bytes!("../favicon.ico");
-        let favicon_route = warp::path("favicon.ico")
+        let favicon_bytes: Vec<u8> = include_bytes!("../favicon.ico").to_vec();
+        let favicon_route = warp::path("favicon.ico".to_owned())
             .and(warp::get())
-            .map(move || warp::reply::with_header(favicon_bytes, "Content-Type", "image/x-icon"));
+            .map(move || {
+                warp::reply::with_header(favicon_bytes.clone(), "Content-Type", "image/x-icon")
+            });
 
-        let current_route = warp::path("current").and(warp::get()).and_then({
+        let current_route = warp::path("current".to_owned()).and(warp::get()).and_then({
             let server = Arc::clone(&server);
             move || {
                 let server = Arc::clone(&server);
@@ -375,13 +378,15 @@ impl IcecastServer {
             }
         });
 
-        let cover_route = warp::path("cover.jpg").and(warp::get()).and_then({
-            let server = Arc::clone(&server);
-            move || {
+        let cover_route = warp::path("cover.jpg".to_owned())
+            .and(warp::get())
+            .and_then({
                 let server = Arc::clone(&server);
-                async move { server.handle_cover_request().await }
-            }
-        });
+                move || {
+                    let server = Arc::clone(&server);
+                    async move { server.handle_cover_request().await }
+                }
+            });
 
         // Swagger API documentation routes
         let swagger_ui_route = server_swagger::swagger_ui();
@@ -551,7 +556,7 @@ impl IcecastServer {
         }
 
         let response = response_builder
-            .body(warp::hyper::Body::wrap_stream(stream))
+            .body(warp::reply::stream(stream).into_response().into_body())
             .map_err(|e| {
                 log::error!("Failed to build HTTP response: {}", e);
                 warp::reject::reject()

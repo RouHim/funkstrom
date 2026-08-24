@@ -5,7 +5,7 @@ pub fn openapi_spec() -> impl Filter<Extract = impl Reply, Error = warp::Rejecti
     warp::path!("api-docs" / "openapi.yaml")
         .and(warp::get())
         .map(|| {
-            let spec = include_str!("../openapi.yaml");
+            let spec = include_str!("../openapi.yaml").to_owned();
             warp::reply::with_header(spec, "Content-Type", "application/x-yaml")
         })
 }
@@ -15,7 +15,7 @@ pub fn swagger_css() -> impl Filter<Extract = impl Reply, Error = warp::Rejectio
     warp::path!("api-docs" / "swagger-ui.css")
         .and(warp::get())
         .map(|| {
-            let css = include_str!("../swagger-ui.css");
+            let css = include_str!("../swagger-ui.css").to_owned();
             warp::reply::with_header(css, "Content-Type", "text/css")
         })
 }
@@ -25,7 +25,7 @@ pub fn swagger_bundle_js() -> impl Filter<Extract = impl Reply, Error = warp::Re
     warp::path!("api-docs" / "swagger-ui-bundle.js")
         .and(warp::get())
         .map(|| {
-            let js = include_str!("../swagger-ui-bundle.js");
+            let js = include_str!("../swagger-ui-bundle.js").to_owned();
             warp::reply::with_header(js, "Content-Type", "application/javascript")
         })
 }
@@ -79,6 +79,6 @@ pub fn swagger_ui() -> impl Filter<Extract = impl Reply, Error = warp::Rejection
     </script>
 </body>
 </html>"#;
-        warp::reply::html(html)
+        warp::reply::html(html.to_owned())
     })
 }
