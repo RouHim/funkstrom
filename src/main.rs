@@ -145,21 +145,20 @@ fn initialize_library(
 
 fn log_last_scan_times(db: &LibraryDatabase) {
     if let Ok(Some(last_full)) = db.get_metadata("last_full_scan") {
-        if let Ok(timestamp) = last_full.parse::<i64>() {
-            let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            log::info!("Last full scan: {}", datetime);
-        }
+        log_last_scan(&last_full, "full");
     }
 
     if let Ok(Some(last_incr)) = db.get_metadata("last_incremental_scan") {
-        if let Ok(timestamp) = last_incr.parse::<i64>() {
-            let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            log::info!("Last incremental scan: {}", datetime);
-        }
+        log_last_scan(&last_incr, "incremental");
+    }
+}
+
+fn log_last_scan(timestamp: &str, label: &str) {
+    if let Ok(timestamp) = timestamp.parse::<i64>() {
+        let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        log::info!("Last {} scan: {}", label, datetime);
     }
 }
 
