@@ -15,6 +15,7 @@ pub(crate) use crate::ffmpeg_process::AudioChunk;
 use crate::ffmpeg_process::{
     calculate_backoff_ms, is_url_input, resolve_ffmpeg_path, AudioProcess,
 };
+use crate::format::{get_codec_for_format, get_muxer_for_format};
 use crate::playback_director::TimelineSnapshot;
 
 // Constants for audio processing configuration
@@ -46,37 +47,6 @@ impl FFmpegProcessor {
             bitrate,
             channels,
             format,
-        }
-    }
-
-    // Config validation (config.rs StreamConfig::validate) only accepts mp3/aac/opus/ogg.
-    // The vorbis and flac arms below are defensive for direct/internal callers and are
-    // intentionally kept in sync with get_muxer_for_format.
-    fn get_codec_for_format(&self, format: &str) -> &str {
-        match format {
-            "mp3" => "libmp3lame",
-            "opus" => "libopus",
-            "aac" => "aac",
-            "vorbis" | "ogg" => "libvorbis",
-            "flac" => "flac",
-            _ => {
-                warn!("Unknown format '{}', defaulting to libmp3lame", format);
-                "libmp3lame"
-            }
-        }
-    }
-
-    fn get_muxer_for_format(&self, format: &str) -> &str {
-        match format {
-            "aac" => "adts",
-            "mp3" => "mp3",
-            "opus" => "opus",
-            "vorbis" | "ogg" => "ogg",
-            "flac" => "flac",
-            _ => {
-                warn!("Unknown format '{}', defaulting to mp3 muxer", format);
-                "mp3"
-            }
         }
     }
 
@@ -120,8 +90,8 @@ impl FFmpegProcessor {
         seek_offset_secs: Option<f64>,
         metadata: Option<&TrackMetadata>,
     ) -> Vec<String> {
-        let codec = self.get_codec_for_format(&self.format);
-        let muxer = self.get_muxer_for_format(&self.format);
+        let codec = get_codec_for_format(&self.format);
+        let muxer = get_muxer_for_format(&self.format);
 
         let mut args = Vec::new();
 
@@ -466,90 +436,6 @@ pub(crate) mod tests {
             .expect("fake ffmpeg script should be marked executable");
         let script_path = path.to_string_lossy().to_string();
         (dir, script_path)
-    }
-
-    #[test]
-    fn given_mp3_format_when_getting_codec_then_returns_libmp3lame() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        assert_eq!(processor.get_codec_for_format("mp3"), "libmp3lame");
-    }
-
-    #[test]
-    fn given_opus_format_when_getting_codec_then_returns_libopus() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "opus".to_string());
-        assert_eq!(processor.get_codec_for_format("opus"), "libopus");
-    }
-
-    #[test]
-    fn given_aac_format_when_getting_codec_then_returns_aac() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
-        assert_eq!(processor.get_codec_for_format("aac"), "aac");
-    }
-
-    #[test]
-    fn given_vorbis_format_when_getting_codec_then_returns_libvorbis() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "vorbis".to_string());
-        assert_eq!(processor.get_codec_for_format("vorbis"), "libvorbis");
-    }
-
-    #[test]
-    fn given_ogg_format_when_getting_codec_then_returns_libvorbis() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
-        assert_eq!(processor.get_codec_for_format("ogg"), "libvorbis");
-    }
-
-    #[test]
-    fn given_flac_format_when_getting_codec_then_returns_flac() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
-        assert_eq!(processor.get_codec_for_format("flac"), "flac");
-    }
-
-    #[test]
-    fn given_unknown_format_when_getting_codec_then_returns_default_libmp3lame() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
-        assert_eq!(processor.get_codec_for_format("unknown"), "libmp3lame");
-    }
-
-    #[test]
-    fn given_aac_format_when_getting_muxer_then_returns_adts() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "aac".to_string());
-        assert_eq!(processor.get_muxer_for_format("aac"), "adts");
-    }
-
-    #[test]
-    fn given_mp3_format_when_getting_muxer_then_returns_mp3() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
-        assert_eq!(processor.get_muxer_for_format("mp3"), "mp3");
-    }
-
-    #[test]
-    fn given_opus_format_when_getting_muxer_then_returns_opus() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "opus".to_string());
-        assert_eq!(processor.get_muxer_for_format("opus"), "opus");
-    }
-
-    #[test]
-    fn given_vorbis_format_when_getting_muxer_then_returns_ogg() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "vorbis".to_string());
-        assert_eq!(processor.get_muxer_for_format("vorbis"), "ogg");
-    }
-
-    #[test]
-    fn given_ogg_format_when_getting_muxer_then_returns_ogg() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "ogg".to_string());
-        assert_eq!(processor.get_muxer_for_format("ogg"), "ogg");
-    }
-
-    #[test]
-    fn given_flac_format_when_getting_muxer_then_returns_flac() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "flac".to_string());
-        assert_eq!(processor.get_muxer_for_format("flac"), "flac");
-    }
-
-    #[test]
-    fn given_unknown_format_when_getting_muxer_then_returns_default_mp3() {
-        let processor = FFmpegProcessor::new(None, 48000, 192, 2, "unknown".to_string());
-        assert_eq!(processor.get_muxer_for_format("unknown"), "mp3");
     }
 
     #[test]
