@@ -813,8 +813,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn given_snapshot_without_encoding_active_flag_when_processing_then_ffmpeg_decision_not_gated(
-    ) {
+    async fn given_timeline_snapshot_when_processing_then_ffmpeg_streams_chunks() {
         let (_temp_dir, fake_ffmpeg_path) = create_fake_ffmpeg_script(
             r#"#!/bin/sh
 printf 'audio'
@@ -847,7 +846,7 @@ exit 0
 
         assert!(
             recv_result.is_ok(),
-            "expected FFmpeg spawn/streaming decision to be independent from is_encoding_active"
+            "expected timeline processing to stream audio chunks"
         );
     }
 
@@ -909,7 +908,7 @@ exit 1
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn given_is_encoding_active_false_when_processing_then_is_paused_never_true() {
+    async fn given_no_listeners_when_processing_then_is_paused_stays_false() {
         let processor = FFmpegProcessor::new(None, 48000, 192, 2, "mp3".to_string());
         let (timeline_tx, timeline_rx) =
             watch::channel(snapshot_with("https://example.com/stream", 0));
@@ -931,7 +930,7 @@ exit 1
 
         assert!(
             !is_paused.load(Ordering::SeqCst),
-            "expected audio processor to never enter paused state based on is_encoding_active"
+            "expected is_paused to stay false when no listeners are connected"
         );
     }
 
@@ -1099,5 +1098,64 @@ exit 0
             !is_paused.load(Ordering::SeqCst),
             "is_paused should stay false before grace period expires"
         );
+    }
+
+    #[test]
+    fn given_absolute_path_when_checking_looks_like_filesystem_path_then_returns_true() {
+        assert!(looks_like_filesystem_path("/usr/bin/ffmpeg"));
+    }
+
+    #[test]
+    fn given_relative_path_when_checking_looks_like_filesystem_path_then_returns_true() {
+        assert!(looks_like_filesystem_path("./ffmpeg"));
+        assert!(looks_like_filesystem_path("bin/ffmpeg"));
+    }
+
+    #[test]
+    fn given_windows_style_path_with_forward_slash_when_checking_looks_like_filesystem_path_then_returns_true(
+    ) {
+        assert!(looks_like_filesystem_path("C:/tools/ffmpeg.exe"));
+    }
+
+    #[test]
+    fn given_url_string_when_checking_looks_like_filesystem_path_then_returns_true() {
+        assert!(
+            looks_like_filesystem_path("http://example.com/stream.mp3"),
+            "current implementation matches on any '/' so URLs also count as filesystem paths"
+        );
+    }
+
+    #[test]
+    fn given_plain_word_when_checking_looks_like_filesystem_path_then_returns_false() {
+        assert!(!looks_like_filesystem_path("ffmpeg"));
+    }
+
+    #[test]
+    fn given_bare_executable_name_with_extension_when_checking_looks_like_filesystem_path_then_returns_false(
+    ) {
+        assert!(!looks_like_filesystem_path("ffmpeg.exe"));
+    }
+
+    #[test]
+    fn given_backslash_only_path_when_checking_looks_like_filesystem_path_then_returns_false() {
+        assert!(!looks_like_filesystem_path(r"C:\tools\ffmpeg.exe"));
+    }
+
+    #[test]
+    fn given_empty_string_when_checking_looks_like_filesystem_path_then_returns_false() {
+        assert!(!looks_like_filesystem_path(""));
+    }
+
+    #[test]
+    fn given_http_and_https_inputs_when_pinning_is_url_input_edge_cases_then_matches_current_truth_table(
+    ) {
+        assert!(is_url_input("https://example.com/stream.mp3"));
+        assert!(!is_url_input(""));
+        // Case-sensitive prefix check: uppercase scheme is not detected
+        assert!(!is_url_input("HTTP://example.com/stream.mp3"));
+        assert!(!is_url_input("HTTPS://example.com/stream.mp3"));
+        // Only http(s) schemes count; other URL schemes fall through
+        assert!(!is_url_input("ftp://example.com/stream.mp3"));
+        assert!(!is_url_input("file:///tmp/song.mp3"));
     }
 }

@@ -95,4 +95,45 @@ mod tests {
         let title = TrackMetadata::default_title(&path);
         assert_eq!(title, "my song");
     }
+
+    #[test]
+    fn test_to_json_fully_populated() {
+        let metadata = TrackMetadata {
+            title: "Test Song".to_string(),
+            artist: "Test Artist".to_string(),
+            album: "Test Album".to_string(),
+            file_path: "/music/test.mp3".to_string(),
+        };
+
+        // serde_json serializes map keys in sorted order (no preserve_order feature)
+        assert_eq!(
+            metadata.to_json(),
+            "{\"album\":\"Test Album\",\"artist\":\"Test Artist\",\"file_path\":\"/music/test.mp3\",\"title\":\"Test Song\"}"
+        );
+    }
+
+    #[test]
+    fn test_to_json_default() {
+        let metadata = TrackMetadata::default();
+
+        assert_eq!(
+            metadata.to_json(),
+            "{\"album\":\"Unknown Album\",\"artist\":\"Unknown Artist\",\"file_path\":\"\",\"title\":\"Unknown Track\"}"
+        );
+    }
+
+    #[test]
+    fn test_to_json_escapes_quotes_and_backslashes() {
+        let metadata = TrackMetadata {
+            title: "He said \"hi\"".to_string(),
+            artist: "Back\\slash".to_string(),
+            album: "Quote\"And\\Both".to_string(),
+            file_path: "/mu\"sic/track 1.flac".to_string(),
+        };
+
+        assert_eq!(
+            metadata.to_json(),
+            "{\"album\":\"Quote\\\"And\\\\Both\",\"artist\":\"Back\\\\slash\",\"file_path\":\"/mu\\\"sic/track 1.flac\",\"title\":\"He said \\\"hi\\\"\"}"
+        );
+    }
 }

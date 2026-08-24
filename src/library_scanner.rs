@@ -30,16 +30,20 @@ impl LibraryScanner {
         }
     }
 
-    pub fn full_scan(&self) -> Result<ScanResult, Box<dyn Error + Send + Sync>> {
-        info!("Starting full library scan in: {:?}", self.music_directory);
-
-        let mut result = ScanResult {
+    fn empty_scan_result() -> ScanResult {
+        ScanResult {
             added: 0,
             updated: 0,
             deleted: 0,
             unchanged: 0,
             errors: Vec::new(),
-        };
+        }
+    }
+
+    pub fn full_scan(&self) -> Result<ScanResult, Box<dyn Error + Send + Sync>> {
+        info!("Starting full library scan in: {:?}", self.music_directory);
+
+        let mut result = Self::empty_scan_result();
 
         let mut files = Vec::new();
         self.scan_directory_recursive(&self.music_directory, &mut files)?;
@@ -103,13 +107,7 @@ impl LibraryScanner {
     pub fn incremental_scan(&self) -> Result<ScanResult, Box<dyn Error + Send + Sync>> {
         info!("Starting incremental library scan");
 
-        let mut result = ScanResult {
-            added: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-            errors: Vec::new(),
-        };
+        let mut result = Self::empty_scan_result();
 
         let track_keys = self.db.get_track_keys()?;
         let mut existing_map: HashMap<String, (i64, i64)> = track_keys
@@ -310,14 +308,14 @@ impl LibraryScanner {
             .unwrap_or("")
             .to_lowercase();
 
+        let fallback_title = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Unknown")
+            .to_string();
         let (title, artist, album) = match Tag::new().read_from_path(path) {
             Ok(tag) => {
-                let title = tag.title().map(|s| s.to_string()).unwrap_or_else(|| {
-                    path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("Unknown")
-                        .to_string()
-                });
+                let title = tag.title().map(|s| s.to_string()).unwrap_or(fallback_title);
                 let artist = tag
                     .artist()
                     .map(|s| s.to_string())
@@ -330,13 +328,8 @@ impl LibraryScanner {
             }
             Err(e) => {
                 debug!("Failed to read tags from {:?}: {}", path, e);
-                let title = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Unknown")
-                    .to_string();
                 (
-                    title,
+                    fallback_title,
                     "Unknown Artist".to_string(),
                     "Unknown Album".to_string(),
                 )

@@ -191,9 +191,6 @@ impl PlaybackDirector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::thread;
     use tokio::time::timeout;
 
@@ -282,13 +279,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn given_no_listeners_when_tick_then_encoding_always_active() {
+    async fn given_tick_within_track_when_director_ticks_then_snapshot_published() {
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
         let mut snapshot_rx = director.snapshot_tx.subscribe();
 
         director.tick();
 
-        let _ = timeout(Duration::from_millis(200), snapshot_rx.changed())
+        timeout(Duration::from_millis(200), snapshot_rx.changed())
             .await
             .expect("expected tick to publish snapshot")
             .expect("expected watch receiver to stay open");
@@ -298,8 +295,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn given_listeners_disconnect_when_tick_then_encoding_stays_active() {
-        let listeners = Arc::new(AtomicUsize::new(1));
+    async fn given_tick_within_track_duration_then_snapshot_unchanged() {
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
 
         director.tick();
@@ -308,7 +304,6 @@ mod tests {
             PathBuf::from("a.mp3")
         );
 
-        listeners.store(0, Ordering::SeqCst);
         director.tick();
 
         let snapshot = director.current_snapshot();
@@ -324,7 +319,7 @@ mod tests {
 
         director.tick();
 
-        let _ = timeout(Duration::from_millis(200), snapshot_rx.changed())
+        timeout(Duration::from_millis(200), snapshot_rx.changed())
             .await
             .expect("expected tick to publish advanced track snapshot")
             .expect("expected watch receiver to stay open");
