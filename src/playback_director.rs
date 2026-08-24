@@ -191,9 +191,6 @@ impl PlaybackDirector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
-    use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::thread;
     use tokio::time::timeout;
 
@@ -299,7 +296,6 @@ mod tests {
 
     #[tokio::test]
     async fn given_listeners_disconnect_when_tick_then_encoding_stays_active() {
-        let listeners = Arc::new(AtomicUsize::new(1));
         let mut director = PlaybackDirector::new(vec![track("a.mp3", 10)]);
 
         director.tick();
@@ -308,7 +304,6 @@ mod tests {
             PathBuf::from("a.mp3")
         );
 
-        listeners.store(0, Ordering::SeqCst);
         director.tick();
 
         let snapshot = director.current_snapshot();
