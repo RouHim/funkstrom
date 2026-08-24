@@ -197,6 +197,37 @@ paths:
                     album: Unknown Album
                     file_path: /music/song-2.mp3
 
+  /cover.jpg:
+    get:
+      tags:
+        - metadata
+      summary: Album cover art of the current track
+      description: |
+        Returns the embedded cover art image of the currently playing track,
+        extracted from the audio file tags (ID3 APIC, Vorbis METADATA_BLOCK_PICTURE, MP4 covr).
+        Useful for displaying artwork in web players and dashboards.
+      operationId: getCurrentCover
+      responses:
+        '200':
+          description: Cover art image of the current track
+          headers:
+            Cache-Control:
+              description: Caching policy
+              schema:
+                type: string
+                example: public, max-age=60
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '204':
+          description: No cover available (no track playing, or track has no embedded cover art)
+
   /:
     get:
       tags:

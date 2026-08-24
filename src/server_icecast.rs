@@ -385,6 +385,8 @@ impl IcecastServer {
 
         // Swagger API documentation routes
         let swagger_ui_route = server_swagger::swagger_ui();
+        let swagger_css_route = server_swagger::swagger_css();
+        let swagger_js_route = server_swagger::swagger_bundle_js();
         let openapi_spec_route = server_swagger::openapi_spec();
 
         let routes = stream_route
@@ -392,6 +394,8 @@ impl IcecastServer {
             .or(current_route)
             .or(cover_route)
             .or(swagger_ui_route)
+            .or(swagger_css_route)
+            .or(swagger_js_route)
             .or(openapi_spec_route)
             .or(info_route)
             .or(favicon_route);
