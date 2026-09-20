@@ -1,3 +1,5 @@
+## [1.6.8](https://github.com/RouHim/funkstrom/compare/1.6.7...1.6.8) (2026-09-20)
+
 ## [1.6.7](https://github.com/RouHim/funkstrom/compare/1.6.6...1.6.7) (2026-09-18)
 
 ## [1.6.6](https://github.com/RouHim/funkstrom/compare/1.6.5...1.6.6) (2026-09-13)
